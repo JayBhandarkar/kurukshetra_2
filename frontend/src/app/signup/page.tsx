@@ -17,11 +17,11 @@ export default function SignupPage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Auto-redirect if already logged in -> redirect inside to /dashboard
+  // Auto-redirect if already logged in -> redirect inside to /app
   useEffect(() => {
     const session = getClientSession();
     if (session?.email) {
-      router.replace("/dashboard");
+      router.replace("/app");
     } else {
       setCheckingAuth(false);
     }

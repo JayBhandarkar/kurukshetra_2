@@ -51,7 +51,7 @@ function VerifyContent() {
 
       setSuccess(true);
       setTimeout(() => {
-        router.push("/dashboard");
+        router.push("/app");
       }, 700);
     } catch (err: unknown) {
       const msg =

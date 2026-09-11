@@ -23,11 +23,11 @@ function LoginContent() {
   const [success, setSuccess] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
 
-  // Auto-redirect if already logged in -> redirect inside to /dashboard
+  // Auto-redirect if already logged in -> redirect inside to /app
   useEffect(() => {
     const session = getClientSession();
     if (session?.email) {
-      router.replace("/dashboard");
+      router.replace("/app");
     } else {
       setCheckingAuth(false);
     }
@@ -64,7 +64,7 @@ function LoginContent() {
 
       setSuccess(true);
       setTimeout(() => {
-        router.push("/dashboard");
+        router.push("/app");
       }, 500);
     } catch (err: unknown) {
       const msg =

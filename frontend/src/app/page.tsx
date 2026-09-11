@@ -30,7 +30,7 @@ export default function Home() {
   useEffect(() => {
     const session = getClientSession();
     if (session?.email) {
-      router.replace("/dashboard");
+      router.replace("/app");
     }
   }, [router]);
 
