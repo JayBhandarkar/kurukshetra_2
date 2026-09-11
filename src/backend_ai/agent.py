@@ -34,6 +34,24 @@ class AgenticRAGOrchestrator:
         )
         return res.data[0].embedding
 
+    @staticmethod
+    def create_embeddings_batch(texts: List[str]) -> List[List[float]]:
+        """Batch generate embeddings for multiple texts in one API call"""
+        if not texts:
+            return []
+        clean_texts = [t.replace("\n", " ").strip() or " " for t in texts]
+        # Batch in groups of 100
+        all_embeddings = []
+        for i in range(0, len(clean_texts), 100):
+            batch = clean_texts[i:i + 100]
+            res = openai_client.embeddings.create(
+                model="text-embedding-3-small",
+                input=batch,
+                dimensions=1536
+            )
+            all_embeddings.extend([item.embedding for item in res.data])
+        return all_embeddings
+
     @classmethod
     def query(cls, user_query: str, ministry_filter: Optional[str] = None) -> Dict[str, Any]:
         # 1. Query Understanding

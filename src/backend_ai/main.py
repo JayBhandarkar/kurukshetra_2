@@ -47,14 +47,34 @@ def health_check():
         "supabase": bool(os.getenv("NEXT_PUBLIC_SUPABASE_URL"))
     }
 
+@app.post("/api/crawl/run")
+def run_live_crawl(limit: int = 1):
+    """
+    Triggers official government document crawl, download, SHA-256 hash, PyMuPDF extraction,
+    storage bucket upload (raw PDF & extracted JSON), and pgvector indexing.
+    """
+    from crawler import SovereignDocumentCrawler
+    return SovereignDocumentCrawler.run_live_crawl(limit=limit)
+
+@app.post("/api/extract/document")
 @app.post("/api/extract/pdf")
-async def extract_pdf(file: UploadFile = File(...)):
+async def extract_document(file: UploadFile = File(...)):
     """
-    Directly parse uploaded PDF using PyMuPDF (fitz) and return structured layout
+    Universal multi-format document extraction endpoint:
+    Supports PDF, Word (.docx), Images (.png, .jpg, .webp), and Plain Text (.txt, .md, .csv)
     """
-    pdf_bytes = await file.read()
-    extracted = DocumentIntelligenceExtractor.extract_from_pdf_bytes(pdf_bytes)
-    return extracted
+    try:
+        file_bytes = await file.read()
+        extracted = DocumentIntelligenceExtractor.extract_document(
+            file_bytes=file_bytes,
+            filename=file.filename or "uploaded_document",
+            mime_type=file.content_type or ""
+        )
+        return extracted
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=str(val_err))
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=f"Document extraction error: {str(err)}")
 
 @app.post("/api/rag/query")
 def query_rag(req: RAGQueryRequest):

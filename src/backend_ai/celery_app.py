@@ -1,5 +1,6 @@
 import os
 from celery import Celery
+from celery.schedules import crontab
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,5 +21,14 @@ celery_app.conf.update(
     timezone="Asia/Kolkata",
     enable_utc=True,
     task_track_started=True,
-    task_time_limit=600, # 10 min max for huge gazette PDFs
+    task_time_limit=900,  # 15 minutes max for full gazette extraction & embeddings
 )
+
+# Automated Daily Crawl Schedule (Runs every morning at 06:00 AM IST)
+celery_app.conf.beat_schedule = {
+    "daily-official-gazette-crawl": {
+        "task": "tasks.run_daily_gazette_crawl",
+        "schedule": crontab(hour=6, minute=0),  # 6:00 AM daily
+        "args": ()
+    }
+}

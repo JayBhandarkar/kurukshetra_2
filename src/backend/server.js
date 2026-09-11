@@ -4,12 +4,13 @@ const path = require("path");
 const dotenv = require("dotenv");
 const { createClient } = require("@supabase/supabase-js");
 
-// Load environment variables from root directory .env or .env.local
-dotenv.config({ path: path.resolve(__dirname, "../.env") });
-dotenv.config({ path: path.resolve(__dirname, "../.env.local") });
+// Load environment variables from local directory and root directory
+dotenv.config({ path: path.resolve(__dirname, ".env") });
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../.env.local") });
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
