@@ -5,19 +5,18 @@ const gmailUser = process.env.GMAIL_USER || process.env.SMTP_USER || "";
 const gmailPass = process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD || "";
 const resendApiKey = process.env.RESEND_API_KEY || "";
 
-// Configure Gmail SMTP Transporter
-const transporter = gmailUser && gmailPass
-  ? nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: gmailUser,
-        pass: gmailPass,
-      },
-    })
-  : null;
+export function getMailTransporter() {
+  const user = process.env.GMAIL_USER || process.env.SMTP_USER || "";
+  const pass = process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASSWORD || "";
 
-// Fallback Resend Client
-const resend = resendApiKey ? new Resend(resendApiKey) : null;
+  if (user && pass) {
+    return nodemailer.createTransport({
+      service: "gmail",
+      auth: { user, pass },
+    });
+  }
+  return null;
+}
 
 export async function sendVerificationEmail({
   to,
@@ -74,10 +73,12 @@ export async function sendVerificationEmail({
   `;
 
   // 1. Send via Gmail SMTP if configured
-  if (transporter && gmailUser) {
+  const transporter = getMailTransporter();
+  const activeGmailUser = process.env.GMAIL_USER || process.env.SMTP_USER;
+  if (transporter && activeGmailUser) {
     try {
       await transporter.sendMail({
-        from: `"Pramaan" <${gmailUser}>`,
+        from: `"Pramaan" <${activeGmailUser}>`,
         to,
         subject: "Verify your email for Pramaan",
         html: emailHtml,
@@ -91,8 +92,10 @@ export async function sendVerificationEmail({
   }
 
   // 2. Fallback to Resend
-  if (resend) {
+  const activeResendKey = process.env.RESEND_API_KEY;
+  if (activeResendKey) {
     try {
+      const resend = new Resend(activeResendKey);
       const fromAddress = process.env.RESEND_FROM_EMAIL || "Pramaan <onboarding@resend.dev>";
       const res = await resend.emails.send({
         from: fromAddress,

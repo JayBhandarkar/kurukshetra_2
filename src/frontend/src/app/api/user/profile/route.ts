@@ -13,7 +13,37 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Email is required" }, { status: 400 });
     }
 
-    // 1. Try fetching from Supabase user_profiles
+    // 1. Try fetching from Supabase signups table (single source of truth)
+    try {
+      const { data: signupUser, error: signupErr } = await supabase
+        .from("signups")
+        .select("email, full_name, primary_domain, role, subscribed_authorities, onboarding_completed")
+        .eq("email", email)
+        .maybeSingle();
+
+      if (!signupErr && signupUser) {
+        return NextResponse.json({
+          success: true,
+          profile: {
+            email: signupUser.email,
+            full_name: signupUser.full_name,
+            primary_domain: signupUser.primary_domain || "Banking, Finance & Tax",
+            role: signupUser.role || "Legal Counsel / Advocate",
+            subscribed_authorities: signupUser.subscribed_authorities || [
+              "Reserve Bank of India (RBI)",
+              "Securities and Exchange Board of India (SEBI)",
+              "Central Board of Direct Taxes (CBDT)",
+              "Ministry of Finance",
+            ],
+            onboarding_completed: Boolean(signupUser.onboarding_completed),
+          },
+        });
+      }
+    } catch (dbErr) {
+      console.warn("Supabase signups fetch notice:", dbErr);
+    }
+
+    // 2. Try fetching from Supabase user_profiles table (secondary)
     try {
       const { data, error } = await supabase
         .from("user_profiles")
@@ -28,7 +58,7 @@ export async function GET(request: Request) {
       console.warn("Supabase user_profiles fetch notice:", dbErr);
     }
 
-    // 2. Check memory cache or return sensible default
+    // 3. Check memory cache or return sensible default
     const cached = profileMemoryCache[email];
     if (cached) {
       return NextResponse.json({ success: true, profile: cached });
@@ -40,9 +70,14 @@ export async function GET(request: Request) {
     const defaultProfile = {
       email,
       full_name: formattedName || "Policy Officer",
-      role: "Policy Researcher / Legal",
+      role: "Legal Counsel / Advocate",
       primary_domain: "Banking, Finance & Tax",
-      subscribed_authorities: ["Reserve Bank of India (RBI)", "Central Board of Direct Taxes (CBDT)", "Ministry of Finance"],
+      subscribed_authorities: [
+        "Reserve Bank of India (RBI)",
+        "Securities and Exchange Board of India (SEBI)",
+        "Central Board of Direct Taxes (CBDT)",
+        "Ministry of Finance",
+      ],
       onboarding_completed: false,
     };
 
@@ -69,11 +104,16 @@ export async function POST(request: Request) {
     const updatedProfile = {
       email: cleanEmail,
       full_name: full_name || defaultName,
-      role: role || "Policy Researcher / Legal",
+      role: role || "Legal Counsel / Advocate",
       primary_domain: primary_domain || "Banking, Finance & Tax",
       subscribed_authorities: Array.isArray(subscribed_authorities)
         ? subscribed_authorities
-        : ["Reserve Bank of India (RBI)", "Central Board of Direct Taxes (CBDT)", "Ministry of Finance"],
+        : [
+            "Reserve Bank of India (RBI)",
+            "Securities and Exchange Board of India (SEBI)",
+            "Central Board of Direct Taxes (CBDT)",
+            "Ministry of Finance",
+          ],
       onboarding_completed: onboarding_completed !== undefined ? Boolean(onboarding_completed) : true,
       updated_at: new Date().toISOString(),
     };
@@ -81,7 +121,34 @@ export async function POST(request: Request) {
     // Store in memory cache
     profileMemoryCache[cleanEmail] = updatedProfile;
 
-    // Try persisting to Supabase
+    // 1. Try mutating in public.signups table
+    try {
+      const { data: signupData, error: signupErr } = await supabase
+        .from("signups")
+        .update({
+          primary_domain: updatedProfile.primary_domain,
+          role: updatedProfile.role,
+          subscribed_authorities: updatedProfile.subscribed_authorities,
+          onboarding_completed: updatedProfile.onboarding_completed,
+          updated_at: updatedProfile.updated_at,
+        })
+        .eq("email", cleanEmail)
+        .select();
+
+      if (!signupErr && signupData && signupData.length > 0) {
+        return NextResponse.json({
+          success: true,
+          profile: {
+            ...updatedProfile,
+            full_name: signupData[0].full_name || updatedProfile.full_name,
+          },
+        });
+      }
+    } catch (e) {
+      console.warn("Supabase signups mutation notice:", e);
+    }
+
+    // 2. Try mutating in user_profiles table (fallback/complement)
     try {
       const { data, error } = await supabase
         .from("user_profiles")
@@ -100,7 +167,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: true, profile: data[0] });
       }
     } catch (dbErr) {
-      console.warn("Supabase user_profiles upsert notice (using persistent session cache):", dbErr);
+      console.warn("Supabase user_profiles upsert notice:", dbErr);
     }
 
     return NextResponse.json({ success: true, profile: updatedProfile });

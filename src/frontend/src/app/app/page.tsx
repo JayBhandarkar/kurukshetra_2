@@ -498,6 +498,8 @@ export default function AuthenticatedApp() {
   }, [currentSession?.messages, isProcessing]);
 
   const handleSignOut = () => {
+    setSessions([]);
+    setCurrentSessionId("");
     clearClientSession();
     router.push("/");
   };
@@ -512,6 +514,13 @@ export default function AuthenticatedApp() {
   };
 
   const startNewChat = async () => {
+    // If the active session is already empty, simply focus it without creating duplicates
+    if (currentSession && (!currentSession.messages || currentSession.messages.length === 0)) {
+      setActiveView("chat");
+      setActiveCitation(null);
+      return;
+    }
+
     const newId = `session-${Date.now()}`;
     const newSession: ChatSession = {
       id: newId,
@@ -520,23 +529,15 @@ export default function AuthenticatedApp() {
       docCount: 0,
       messages: [],
     };
-    const updated = [newSession, ...sessions];
+    // Keep past conversations that have messages + prepend new empty draft
+    const existingActive = sessions.filter((s) => s.messages && s.messages.length > 0);
+    const updated = [newSession, ...existingActive];
     setSessions(updated);
     setCurrentSessionId(newId);
     setActiveView("chat");
     setActiveCitation(null);
     setHasMoreMessages(false);
     setMessagesCursor(null);
-
-    // Persist to backend
-    if (user?.email) {
-      localStorage.setItem(`pramaan_chat_sessions_${user.email}`, JSON.stringify(updated));
-      fetch("/api/conversations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.email, title: "New Conversation", customId: newId }),
-      }).catch((e) => console.warn("Background conversation creation error:", e));
-    }
   };
 
   const deleteSession = async (sessionId: string, e: React.MouseEvent) => {
@@ -1034,31 +1035,49 @@ All clauses have been verified against the Central Government Knowledge Base.`,
           <div className="px-2 pt-0 pb-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
             Recent Analysis
           </div>
-          {sessions.filter(s => !sidebarSearch || s.title.toLowerCase().includes(sidebarSearch.toLowerCase())).map((s) => (
-            <div
-              key={s.id}
-              onClick={() => {
-                setCurrentSessionId(s.id);
-                setActiveView("chat");
-                setActiveCitation(null);
-              }}
-              className={`group flex items-center justify-between px-2 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer ${
-                currentSessionId === s.id && activeView === "chat"
-                  ? "bg-[#EAE3D9] text-[#1E1A17] font-medium"
-                  : "text-stone-600 hover:bg-[#F3EDE4] hover:text-stone-900"
-              }`}
-            >
-              <span className="truncate flex-1 pr-1">{s.title}</span>
-              <button
-                type="button"
-                onClick={(e) => deleteSession(s.id, e)}
-                className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-700 rounded transition-opacity flex-shrink-0"
-                title="Delete conversation"
+          {(() => {
+            const displaySessions = sessions
+              .filter(
+                (s) =>
+                  (s.messages && s.messages.length > 0) ||
+                  (s.title !== "New Conversation" && !s.id.startsWith("session-"))
+              )
+              .filter((s) => !sidebarSearch || s.title.toLowerCase().includes(sidebarSearch.toLowerCase()));
+
+            if (displaySessions.length === 0) {
+              return (
+                <div className="px-2 py-4 text-center text-xs text-stone-400 italic">
+                  No previous analyses yet
+                </div>
+              );
+            }
+
+            return displaySessions.map((s) => (
+              <div
+                key={s.id}
+                onClick={() => {
+                  setCurrentSessionId(s.id);
+                  setActiveView("chat");
+                  setActiveCitation(null);
+                }}
+                className={`group flex items-center justify-between px-2 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer ${
+                  currentSessionId === s.id && activeView === "chat"
+                    ? "bg-[#EAE3D9] text-[#1E1A17] font-medium"
+                    : "text-stone-600 hover:bg-[#F3EDE4] hover:text-stone-900"
+                }`}
               >
-                <Trash2 className="w-3 h-3 text-stone-400 hover:text-red-600" />
-              </button>
-            </div>
-          ))}
+                <span className="truncate flex-1 pr-1">{s.title}</span>
+                <button
+                  type="button"
+                  onClick={(e) => deleteSession(s.id, e)}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-700 rounded transition-opacity flex-shrink-0"
+                  title="Delete conversation"
+                >
+                  <Trash2 className="w-3 h-3 text-stone-400 hover:text-red-600" />
+                </button>
+              </div>
+            ));
+          })()}
           {hasMoreConversations && (
             <button
               type="button"
@@ -1801,7 +1820,9 @@ All clauses have been verified against the Central Government Knowledge Base.`,
         <OnboardingChecklistModal
           userEmail={user.email}
           userFullName={user.fullName}
+          initialDomain={user.primaryDomain}
           initialRole={user.role}
+          initialAuthorities={user.subscribedAuthorities}
           onCancel={() => setShowOnboardingModal(false)}
           onComplete={(prefs: OnboardingPreferences) => {
             const updated = {

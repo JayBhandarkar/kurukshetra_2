@@ -4,7 +4,7 @@ import { supabase } from "@/lib/supabaseClient";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { email, role } = body;
+    const { email, fullName } = body;
 
     if (!email) {
       return NextResponse.json(
@@ -15,11 +15,11 @@ export async function POST(request: Request) {
 
     const { data, error } = await supabase
       .from("signups")
-      .insert([
+      .upsert([
         {
-          email,
-          role: role || "Policy Researcher / Legal",
-          created_at: new Date().toISOString(),
+          email: email.toLowerCase().trim(),
+          full_name: fullName?.trim() || "",
+          updated_at: new Date().toISOString(),
         },
       ])
       .select();

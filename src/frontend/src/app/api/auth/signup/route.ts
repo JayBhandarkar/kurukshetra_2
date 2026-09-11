@@ -6,7 +6,7 @@ import { setStoredVerification } from "../send-verification/route";
 
 export async function POST(request: Request) {
   try {
-    const { fullName, email, password, role } = await request.json();
+    const { fullName, email, password } = await request.json();
 
     if (!email || !password) {
       return NextResponse.json(
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const cleanEmail = email.toLowerCase().trim();
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 1. Check if user already exists
+    // 1. Check if verified user already exists
     try {
       const { data: existingUser } = await supabase
         .from("signups")
@@ -36,14 +36,17 @@ export async function POST(request: Request) {
       console.warn("DB check notice:", dbErr);
     }
 
-    // 2. Generate 6-digit OTP
+    // 2. Generate 6-digit OTP and cryptographic hash
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
+    const codeHash = await bcrypt.hash(code, 10);
+    const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes validity
+    const isoExpiry = new Date(expiresAt).toISOString();
+    const nowIso = new Date().toISOString();
 
-    // Store in-memory
-    setStoredVerification(cleanEmail, { code, expiresAt, name: fullName });
+    // Store in-memory fallback
+    setStoredVerification(cleanEmail, { codeHash, expiresAt, name: fullName });
 
-    // 3. Upsert into Supabase tables
+    // 3. Upsert into unified 'signups' table (No roles, single table)
     try {
       await supabase.from("signups").upsert(
         [
@@ -51,21 +54,11 @@ export async function POST(request: Request) {
             email: cleanEmail,
             full_name: fullName?.trim() || "",
             password_hash: hashedPassword,
-            role: role || "Policy Researcher / Legal",
+            verification_code_hash: codeHash,
+            code_expires_at: isoExpiry,
             is_verified: false,
-            created_at: new Date().toISOString(),
-          },
-        ],
-        { onConflict: "email" }
-      );
-
-      await supabase.from("verification_codes").upsert(
-        [
-          {
-            email: cleanEmail,
-            code,
-            expires_at: new Date(expiresAt).toISOString(),
-            is_verified: false,
+            created_at: nowIso,
+            updated_at: nowIso,
           },
         ],
         { onConflict: "email" }
@@ -74,7 +67,7 @@ export async function POST(request: Request) {
       console.warn("Database storage warning (using in-memory):", dbErr);
     }
 
-    // 4. Send verification email via Resend
+    // 4. Send verification email
     const emailRes = await sendVerificationEmail({
       to: cleanEmail,
       name: fullName,
@@ -82,7 +75,19 @@ export async function POST(request: Request) {
     });
 
     if (emailRes.error) {
-      console.error("Resend send error:", emailRes.error);
+      console.warn("Email dispatch notice:", emailRes.error.message);
+      console.log(`\n======================================================`);
+      console.log(`🔑 [PRAMAAN VERIFICATION OTP] for ${cleanEmail}: ${code}`);
+      console.log(`======================================================\n`);
+
+      if (process.env.NODE_ENV === "development") {
+        return NextResponse.json({
+          success: true,
+          message: "Verification code sent (check terminal console in test mode)",
+          devCode: code,
+        });
+      }
+
       return NextResponse.json(
         { error: emailRes.error.message || "Failed to send verification email" },
         { status: 500 }

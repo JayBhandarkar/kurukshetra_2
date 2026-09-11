@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import { getStoredVerification, clearStoredVerification } from "../send-verification/route";
 import { supabase } from "@/lib/supabaseClient";
 
-// In-memory verified accounts set
+// In-memory verified accounts cache
 const verifiedEmails = new Set<string>();
 
 export function isEmailVerified(email: string): boolean {
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
 
     let isValid = false;
 
-    // 1. Check in-memory store
+    // 1. Check in-memory fallback store
     const stored = getStoredVerification(cleanEmail);
     if (stored) {
       if (Date.now() > stored.expiresAt) {
@@ -38,32 +39,45 @@ export async function POST(request: Request) {
           { status: 400 }
         );
       }
-      if (stored.code === cleanCode) {
+      const match = await bcrypt.compare(cleanCode, stored.codeHash);
+      if (match) {
         isValid = true;
         clearStoredVerification(cleanEmail);
       }
     }
 
-    // 2. Check Supabase table if stored check didn't pass
+    // 2. Check Supabase 'signups' table with hashed code comparison
     if (!isValid) {
       try {
-        const { data } = await supabase
-          .from("verification_codes")
-          .select("*")
+        const { data: userRecord } = await supabase
+          .from("signups")
+          .select("id, email, full_name, verification_code_hash, code_expires_at")
           .eq("email", cleanEmail)
-          .eq("code", cleanCode)
-          .single();
+          .maybeSingle();
 
-        if (data && new Date(data.expires_at).getTime() > Date.now()) {
-          isValid = true;
-          // Mark in database
-          await supabase
-            .from("verification_codes")
-            .update({ is_verified: true })
-            .eq("email", cleanEmail);
+        if (userRecord && userRecord.verification_code_hash) {
+          const isExpired = userRecord.code_expires_at
+            ? new Date(userRecord.code_expires_at).getTime() < Date.now()
+            : false;
+
+          if (isExpired) {
+            return NextResponse.json(
+              { error: "Verification code has expired. Please request a new code." },
+              { status: 400 }
+            );
+          }
+
+          const match = await bcrypt.compare(
+            cleanCode,
+            userRecord.verification_code_hash
+          );
+
+          if (match) {
+            isValid = true;
+          }
         }
       } catch (dbErr) {
-        console.warn("DB check fallback warning:", dbErr);
+        console.warn("DB verify fallback warning:", dbErr);
       }
     }
 
@@ -74,28 +88,32 @@ export async function POST(request: Request) {
       );
     }
 
-    // Mark email as verified
+    // Mark email as verified in memory cache
     markEmailVerified(cleanEmail);
 
-    // Fetch user details & profile from database
-    let profileData = null;
-    let role = "Policy Researcher / Legal";
-    let fullName = cleanEmail.split("@")[0];
-
+    // 3. Update Supabase 'signups' table (Mark verified, clear active OTP hash)
+    let userFullName = cleanEmail.split("@")[0];
     try {
-      const { data } = await supabase
+      const { data: updated } = await supabase
         .from("signups")
-        .select("email, full_name, role")
+        .update({
+          is_verified: true,
+          verification_code_hash: null,
+          updated_at: new Date().toISOString(),
+        })
         .eq("email", cleanEmail)
-        .single();
-      if (data) {
-        fullName = data.full_name || fullName;
-        role = data.role || role;
+        .select("email, full_name")
+        .maybeSingle();
+
+      if (updated?.full_name) {
+        userFullName = updated.full_name;
       }
     } catch (e) {
-      console.warn("Could not fetch user name:", e);
+      console.warn("DB update notice:", e);
     }
 
+    // 4. Fetch user profile data if available
+    let profileData = null;
     try {
       const { data: prof } = await supabase
         .from("user_profiles")
@@ -107,24 +125,22 @@ export async function POST(request: Request) {
       console.warn("user_profiles lookup notice:", profErr);
     }
 
-    const userData = {
-      email: cleanEmail,
-      fullName: profileData?.full_name || fullName,
-      role: profileData?.role || role,
-      primaryDomain: profileData?.primary_domain || "Banking, Finance & Tax",
-      subscribedAuthorities: profileData?.subscribed_authorities || [
-        "Reserve Bank of India (RBI)",
-        "Central Board of Direct Taxes (CBDT)",
-        "Ministry of Finance",
-      ],
-      onboardingCompleted: profileData ? Boolean(profileData.onboarding_completed) : false,
-      isVerified: true,
-    };
-
     return NextResponse.json({
       success: true,
       message: "Email successfully verified! Entering workspace...",
-      user: userData,
+      user: {
+        email: cleanEmail,
+        fullName: profileData?.full_name || userFullName,
+        role: profileData?.role || "Policy Researcher / Legal",
+        primaryDomain: profileData?.primary_domain || "Banking, Finance & Tax",
+        subscribedAuthorities: profileData?.subscribed_authorities || [
+          "Reserve Bank of India (RBI)",
+          "Central Board of Direct Taxes (CBDT)",
+          "Ministry of Finance",
+        ],
+        onboardingCompleted: profileData ? Boolean(profileData.onboarding_completed) : false,
+        isVerified: true,
+      },
     });
   } catch (err: unknown) {
     const errorMsg =

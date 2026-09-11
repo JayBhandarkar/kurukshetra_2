@@ -1,21 +1,22 @@
 import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
 import { sendVerificationEmail } from "@/lib/email";
 import { supabase } from "@/lib/supabaseClient";
 
-// In-memory fallback verification store in case database table is pending
+// In-memory fallback verification store
 const inMemoryCodes = new Map<
   string,
-  { code: string; expiresAt: number; name?: string }
+  { codeHash: string; expiresAt: number; name?: string }
 >();
 
-// Export helper for route sharing
+// Export helpers for route sharing
 export function getStoredVerification(email: string) {
   return inMemoryCodes.get(email.toLowerCase());
 }
 
 export function setStoredVerification(
   email: string,
-  data: { code: string; expiresAt: number; name?: string }
+  data: { codeHash: string; expiresAt: number; name?: string }
 ) {
   inMemoryCodes.set(email.toLowerCase(), data);
 }
@@ -35,48 +36,45 @@ export async function POST(request: Request) {
       );
     }
 
-    // Generate 6-digit numeric OTP code
+    const cleanEmail = email.toLowerCase().trim();
+
+    // 1. Generate 6-digit numeric OTP code and cryptographic hash
     const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const codeHash = await bcrypt.hash(code, 10);
     const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes validity
+    const isoExpiry = new Date(expiresAt).toISOString();
 
-    // Store in memory
-    setStoredVerification(email, { code, expiresAt, name });
+    // Store hashed code in-memory fallback
+    setStoredVerification(cleanEmail, { codeHash, expiresAt, name });
 
-    // Also attempt storing in Supabase verification_codes table if exists
+    // 2. Update hashed verification code in single unified 'signups' table
     try {
-      await supabase.from("verification_codes").upsert(
-        [
-          {
-            email: email.toLowerCase().trim(),
-            code,
-            expires_at: new Date(expiresAt).toISOString(),
-            is_verified: false,
-          },
-        ],
-        { onConflict: "email" }
-      );
+      await supabase
+        .from("signups")
+        .update({
+          verification_code_hash: codeHash,
+          code_expires_at: isoExpiry,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("email", cleanEmail);
     } catch (dbErr) {
       console.warn("Database storage warning (using in-memory fallback):", dbErr);
     }
 
-    // Send email via Resend
+    // 3. Send plaintext OTP code to user's email
     const result = await sendVerificationEmail({
-      to: email.trim(),
+      to: cleanEmail,
       name,
       code,
     });
 
     if (result.error) {
-      console.warn("⚠️ Resend API warning (Test domain restriction):", result.error.message);
+      console.warn("Email service warning:", result.error.message);
       console.log(`\n======================================================`);
-      console.log(`🔑 [PRAMAAN VERIFICATION OTP] for ${email}: ${code}`);
+      console.log(`🔑 [PRAMAAN VERIFICATION OTP] for ${cleanEmail}: ${code}`);
       console.log(`======================================================\n`);
 
-      // If in development or using resend test domain, allow verification to proceed
-      if (
-        result.error.message?.includes("testing emails to your own email address") ||
-        process.env.NODE_ENV === "development"
-      ) {
+      if (process.env.NODE_ENV === "development") {
         return NextResponse.json({
           success: true,
           message: "Verification code sent (check terminal console in test mode)",
@@ -85,12 +83,12 @@ export async function POST(request: Request) {
       }
 
       return NextResponse.json(
-        { error: result.error.message || "Failed to send email via Resend" },
+        { error: result.error.message || "Failed to send email" },
         { status: 500 }
       );
     }
 
-    console.log(`\n✉️ Email sent via Resend to ${email} (OTP: ${code})\n`);
+    console.log(`\n✉️ Verification email delivered to ${cleanEmail}\n`);
 
     return NextResponse.json({
       success: true,

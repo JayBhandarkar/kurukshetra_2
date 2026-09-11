@@ -16,12 +16,22 @@ export async function POST(request: Request) {
 
     const cleanEmail = email.toLowerCase().trim();
 
-    // 1. Fetch user record from database
-    let userRecord = null;
+    // 1. Fetch user record from unified 'signups' table
+    let userRecord: {
+      id: string;
+      email: string;
+      full_name: string;
+      password_hash: string;
+      is_verified: boolean;
+      primary_domain?: string;
+      role?: string;
+      subscribed_authorities?: string[];
+      onboarding_completed?: boolean;
+    } | null = null;
     try {
       const { data } = await supabase
         .from("signups")
-        .select("*")
+        .select("id, email, full_name, password_hash, is_verified, primary_domain, role, subscribed_authorities, onboarding_completed")
         .eq("email", cleanEmail)
         .maybeSingle();
 
@@ -30,15 +40,22 @@ export async function POST(request: Request) {
       console.warn("DB fetch notice:", dbErr);
     }
 
+    if (!userRecord) {
+      return NextResponse.json(
+        { error: "No account found with this email. Please create an account first." },
+        { status: 404 }
+      );
+    }
+
     // 2. Check if user is verified
     const isVerified =
-      userRecord?.is_verified === true || isEmailVerified(cleanEmail);
+      userRecord.is_verified === true || isEmailVerified(cleanEmail);
 
     if (!isVerified) {
       return NextResponse.json(
         {
           error:
-            "Your email has not been verified yet. Please verify with the 6-digit code sent via Resend.",
+            "Your email has not been verified yet. Please enter the 6-digit verification code sent to your inbox.",
           unverified: true,
           email: cleanEmail,
         },
@@ -46,8 +63,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // 3. Verify password if password hash is stored
-    if (userRecord?.password_hash) {
+    // 3. Verify password hash
+    if (userRecord.password_hash) {
       const passwordMatch = await bcrypt.compare(
         password,
         userRecord.password_hash
@@ -60,7 +77,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // 4. Fetch user profile preferences if available
+    // 4. Fetch secondary user profile preferences if available
     let profileData = null;
     try {
       const { data: prof } = await supabase
@@ -73,19 +90,30 @@ export async function POST(request: Request) {
       console.warn("user_profiles lookup notice:", profErr);
     }
 
+    const primaryDomain = userRecord.primary_domain || profileData?.primary_domain || "Banking, Finance & Tax";
+    const role = userRecord.role || profileData?.role || "Legal Counsel / Advocate";
+    const subscribedAuthorities = userRecord.subscribed_authorities || profileData?.subscribed_authorities || [
+      "Reserve Bank of India (RBI)",
+      "Securities and Exchange Board of India (SEBI)",
+      "Central Board of Direct Taxes (CBDT)",
+      "Ministry of Finance",
+    ];
+    const onboardingCompleted =
+      userRecord.onboarding_completed !== undefined
+        ? Boolean(userRecord.onboarding_completed)
+        : profileData
+        ? Boolean(profileData.onboarding_completed)
+        : false;
+
     return NextResponse.json({
       success: true,
       user: {
         email: cleanEmail,
-        fullName: profileData?.full_name || userRecord?.full_name || cleanEmail.split("@")[0].title,
-        role: profileData?.role || userRecord?.role || "Policy Researcher / Legal",
-        primaryDomain: profileData?.primary_domain || "Banking, Finance & Tax",
-        subscribedAuthorities: profileData?.subscribed_authorities || [
-          "Reserve Bank of India (RBI)",
-          "Central Board of Direct Taxes (CBDT)",
-          "Ministry of Finance",
-        ],
-        onboardingCompleted: profileData ? Boolean(profileData.onboarding_completed) : false,
+        fullName: userRecord.full_name || profileData?.full_name || cleanEmail.split("@")[0],
+        role,
+        primaryDomain,
+        subscribedAuthorities,
+        onboardingCompleted,
         isVerified: true,
       },
     });

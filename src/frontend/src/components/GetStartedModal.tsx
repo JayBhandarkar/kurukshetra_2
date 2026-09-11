@@ -29,10 +29,9 @@ export function GetStartedModal({ isOpen, onClose }: GetStartedModalProps) {
     try {
       const { error } = await supabase
         .from("signups")
-        .insert([
+        .upsert([
           {
-            email: email.trim(),
-            role,
+            email: email.trim().toLowerCase(),
             created_at: new Date().toISOString(),
           },
         ]);

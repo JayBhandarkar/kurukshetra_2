@@ -20,10 +20,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ verified: true });
     }
 
-    // 2. Check Supabase verification_codes table
+    // 2. Check Supabase unified 'signups' table
     try {
       const { data } = await supabase
-        .from("verification_codes")
+        .from("signups")
         .select("is_verified")
         .eq("email", cleanEmail)
         .eq("is_verified", true)

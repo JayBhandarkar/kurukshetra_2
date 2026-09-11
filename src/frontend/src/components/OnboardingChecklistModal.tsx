@@ -13,7 +13,9 @@ export interface OnboardingPreferences {
 interface OnboardingChecklistModalProps {
   userEmail: string;
   userFullName?: string;
+  initialDomain?: string;
   initialRole?: string;
+  initialAuthorities?: string[];
   onComplete: (prefs: OnboardingPreferences) => void;
   onCancel?: () => void;
 }
@@ -110,7 +112,9 @@ const ALL_AUTHORITIES = [
 export function OnboardingChecklistModal({
   userEmail,
   userFullName,
+  initialDomain,
   initialRole,
+  initialAuthorities,
   onComplete,
   onCancel,
 }: OnboardingChecklistModalProps) {
@@ -118,14 +122,18 @@ export function OnboardingChecklistModal({
   const [prevStep, setPrevStep] = useState<1 | 2 | 3>(1);
   const [animating, setAnimating] = useState(false);
   const [direction, setDirection] = useState<"forward" | "back">("forward");
-  const [selectedDomain, setSelectedDomain] = useState("Banking, Finance & Tax");
+  const [selectedDomain, setSelectedDomain] = useState(initialDomain || "Banking, Finance & Tax");
   const [selectedRole, setSelectedRole] = useState(initialRole || "Legal Counsel / Advocate");
-  const [selectedAuthorities, setSelectedAuthorities] = useState<string[]>([
-    "Reserve Bank of India (RBI)",
-    "Securities and Exchange Board of India (SEBI)",
-    "Central Board of Direct Taxes (CBDT)",
-    "Ministry of Finance",
-  ]);
+  const [selectedAuthorities, setSelectedAuthorities] = useState<string[]>(
+    initialAuthorities && initialAuthorities.length > 0
+      ? initialAuthorities
+      : [
+          "Reserve Bank of India (RBI)",
+          "Securities and Exchange Board of India (SEBI)",
+          "Central Board of Direct Taxes (CBDT)",
+          "Ministry of Finance",
+        ]
+  );
   const [saving, setSaving] = useState(false);
 
   const goToStep = (next: 1 | 2 | 3) => {
