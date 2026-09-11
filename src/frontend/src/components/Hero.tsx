@@ -1,48 +1,22 @@
 "use client";
 
-import React, { useState } from "react";
-import { Search, ArrowRight } from "lucide-react";
+import React from "react";
+import { Radio, FileText, Scale, BookOpen, ShieldCheck } from "lucide-react";
 import { DocumentVisual, DocumentCardData } from "./DocumentVisual";
 
 interface HeroProps {
-  onSearchSubmit: (query: string) => void;
+  onSearchSubmit?: (query: string) => void;
   onSelectDocument: (doc: DocumentCardData) => void;
-  onCompareTrigger: () => void;
+  onCompareTrigger?: () => void;
 }
 
 export function Hero({
-  onSearchSubmit,
   onSelectDocument,
-  onCompareTrigger,
 }: HeroProps) {
-  const [query, setQuery] = useState("");
-
-  const suggestedQueries = [
-    { text: "What is the eligibility for this scheme?", type: "search" },
-    { text: "Summarize this notification", type: "search" },
-    { text: "What changed between these documents?", type: "compare" },
-  ];
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (query.trim()) {
-      onSearchSubmit(query.trim());
-    }
-  };
-
-  const handleSuggestionClick = (item: { text: string; type: string }) => {
-    setQuery(item.text);
-    if (item.type === "compare") {
-      onCompareTrigger();
-    } else {
-      onSearchSubmit(item.text);
-    }
-  };
-
   return (
     <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-4 lg:pt-12 lg:pb-6">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-6 items-center">
-        {/* Left Column (Content & Search) */}
+        {/* Left Column (Content & Live Feeds) */}
         <div className="lg:col-span-6 xl:col-span-6 flex flex-col justify-center">
           {/* Eyebrow */}
           <div className="mb-4">
@@ -62,41 +36,44 @@ export function Hero({
             Pramaan helps you search, summarize, compare and understand government circulars, notifications, orders, guidelines and policy documents — with accurate answers and trusted source references.
           </p>
 
-          {/* Search Input Bar */}
-          <form
-            onSubmit={handleSubmit}
-            className="relative flex items-center w-full max-w-[540px] bg-white rounded-full border border-[#E3DDD4] shadow-[0_4px_24px_rgba(0,0,0,0.04)] pl-5 pr-2 py-2 mt-7 transition-all duration-200 focus-within:border-[#5D2A18] focus-within:ring-2 focus-within:ring-[#5D2A18]/20 focus-within:shadow-md"
-          >
-            <Search className="w-5 h-5 text-[#8F887D] mr-3 flex-shrink-0" />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ask a question about any government document..."
-              className="w-full bg-transparent text-sm sm:text-[15px] text-[#1E1A17] placeholder-[#8F887D] focus:outline-none"
-            />
-            <button
-              type="submit"
-              aria-label="Search documents"
-              className="w-10 h-10 rounded-full bg-[#5D2A18] hover:bg-[#431D10] text-white flex items-center justify-center transition-all duration-150 hover:scale-105 active:scale-95 flex-shrink-0 ml-2 shadow-sm cursor-pointer"
-            >
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </form>
+          {/* Live Sovereign Feeds & Supported Portals */}
+          <div className="mt-7 space-y-3.5 max-w-[530px]">
+            {/* Live Feed Status Bar */}
+            <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 bg-[#FAF4EC] border border-[#EADBCC] rounded-full text-xs text-[#5D2A18]">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600"></span>
+              </span>
+              <span className="font-semibold text-[11.5px] tracking-wide">
+                Live Data Feeds: <span className="font-normal text-stone-600">egazette.gov.in · pib.gov.in · Central Ministries</span>
+              </span>
+            </div>
 
-          {/* Try Asking Suggested Pills */}
-          <div className="flex flex-wrap items-center gap-2 mt-5 text-xs">
-            <span className="font-semibold text-[#302B25] mr-1">Try asking:</span>
-            {suggestedQueries.map((item, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => handleSuggestionClick(item)}
-                className="bg-[#EAE4DC]/80 hover:bg-[#DFD8CE] text-[#38322C] font-medium px-3.5 py-1.5 rounded-full transition-all duration-150 text-[11.5px] sm:text-xs cursor-pointer border border-[#DFD8CE]/70"
-              >
-                {item.text}
-              </button>
-            ))}
+            {/* Supported Document Classification Tags */}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E8E2D8] rounded-xl text-xs font-medium text-stone-700 shadow-2xs">
+                <FileText className="w-3.5 h-3.5 text-[#8C4A32]" />
+                <span>Extraordinary Gazettes</span>
+              </div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E8E2D8] rounded-xl text-xs font-medium text-stone-700 shadow-2xs">
+                <Radio className="w-3.5 h-3.5 text-[#8C4A32]" />
+                <span>Ministry Circulars</span>
+              </div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E8E2D8] rounded-xl text-xs font-medium text-stone-700 shadow-2xs">
+                <Scale className="w-3.5 h-3.5 text-[#8C4A32]" />
+                <span>Statutory Orders</span>
+              </div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E8E2D8] rounded-xl text-xs font-medium text-stone-700 shadow-2xs">
+                <BookOpen className="w-3.5 h-3.5 text-[#8C4A32]" />
+                <span>Policy Frameworks</span>
+              </div>
+            </div>
+
+            {/* Subtle Provenance Note */}
+            <div className="flex items-center gap-1.5 text-[11.5px] text-stone-500 pt-0.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-700 flex-shrink-0" />
+              <span>Verifiable clause-level provenance with cryptographic source attribution</span>
+            </div>
           </div>
         </div>
 
