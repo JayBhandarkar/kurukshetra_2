@@ -245,6 +245,8 @@ export default function AuthenticatedApp() {
 
   // Sidebar toggle state
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarSearch, setSidebarSearch] = useState("");
+  const [showSidebarSearch, setShowSidebarSearch] = useState(false);
 
   // Active Selected Evidence Drawer
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
@@ -458,7 +460,7 @@ export default function AuthenticatedApp() {
 
   // Scroll to bottom when messages update
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollTo({ top: messagesEndRef.current.scrollHeight, behavior: "smooth" });
   }, [currentSession?.messages, isProcessing]);
 
   const handleSignOut = () => {
@@ -888,9 +890,9 @@ All clauses have been verified against the Central Government Knowledge Base.`,
         }`}
       >
         {/* Top: Brand Header & New Analysis CTA */}
-        <div className="p-3.5 space-y-3">
+        <div className="px-3 pt-4 pb-0 space-y-1">
           {/* Brand Row */}
-          <div className="flex items-center justify-between px-1.5 pt-1">
+          <div className="flex items-center justify-between">
             <Link href="/app" className="flex items-center gap-2.5 group">
               <PillarLogoIcon className="w-6 h-6 text-[#1E1A17] transition-transform group-hover:scale-105" />
               <div className="flex flex-col">
@@ -903,21 +905,55 @@ All clauses have been verified against the Central Government Knowledge Base.`,
               </div>
             </Link>
 
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-[#EFE9E0] rounded-lg transition-colors cursor-pointer"
-              title="Close sidebar"
-            >
-              <PanelLeftClose className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              {/* Search Toggle */}
+              <button
+                onClick={() => { setShowSidebarSearch(v => !v); setSidebarSearch(""); }}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showSidebarSearch ? "bg-[#EFE9E0] text-[#5D2A18]" : "text-stone-400 hover:text-stone-700 hover:bg-[#EFE9E0]"}`}
+                title="Search conversations"
+              >
+                <Search className="w-4 h-4" />
+              </button>
+              {/* Close Sidebar */}
+              <button
+                onClick={() => setSidebarOpen(false)}
+                className="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-[#EFE9E0] rounded-lg transition-colors cursor-pointer"
+                title="Close sidebar"
+              >
+                <PanelLeft className="w-4 h-4" />
+              </button>
+            </div>
           </div>
+
+          {/* Inline Search Input */}
+          {showSidebarSearch && (
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={sidebarSearch}
+              onChange={(e) => setSidebarSearch(e.target.value)}
+              placeholder="Search conversations..."
+              autoFocus
+              className="w-full pl-8 pr-3 py-1.5 bg-[#F3EDE4] border border-[#E8E2D8] rounded-lg text-[11px] text-stone-700 placeholder-stone-400 focus:outline-none focus:border-[#5D2A18]"
+            />
+            {sidebarSearch && (
+              <button
+                onClick={() => setSidebarSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+          )}
 
           {/* + New Analysis Button */}
           <button
             onClick={startNewChat}
-            className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-[#5D2A18] hover:bg-[#431D10] text-white rounded-xl text-xs font-semibold shadow-xs transition-all duration-150 cursor-pointer"
+            className="w-full flex items-center gap-2.5 px-2 py-2 mt-1 text-[13px] font-medium text-stone-700 hover:bg-[#F3EDE4] hover:text-stone-900 rounded-lg transition-colors cursor-pointer"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 text-stone-500" />
             <span>New Analysis</span>
           </button>
 
@@ -929,16 +965,6 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             accept=".pdf,.doc,.docx,.txt,.csv,.json,.md"
             className="hidden"
           />
-
-          {/* Select / Upload Local Document Button */}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-[#FAF4EC] hover:bg-[#F0E6D8] text-[#5D2A18] border border-[#EADBCC] rounded-xl text-xs font-semibold shadow-2xs transition-all duration-150 cursor-pointer"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            <span>Select Local Document</span>
-          </button>
 
           {/* Attached Document Indicator in Sidebar (if active) */}
           {attachedDoc && (
@@ -963,11 +989,11 @@ All clauses have been verified against the Central Government Knowledge Base.`,
         </div>
 
         {/* Middle: Recent Chats List */}
-        <div className="flex-1 px-3 py-2 overflow-y-auto space-y-1 scrollbar-thin">
-          <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-stone-400">
+        <div className="flex-1 px-3 pt-0 pb-2 overflow-y-auto space-y-0.5 scrollbar-thin">
+          <div className="px-2 pt-0 pb-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
             Recent Analysis
           </div>
-          {sessions.map((s) => (
+          {sessions.filter(s => !sidebarSearch || s.title.toLowerCase().includes(sidebarSearch.toLowerCase())).map((s) => (
             <div
               key={s.id}
               onClick={() => {
@@ -975,9 +1001,9 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                 setActiveView("chat");
                 setActiveCitation(null);
               }}
-              className={`group flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[12px] transition-colors cursor-pointer ${
+              className={`group flex items-center justify-between px-2 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer ${
                 currentSessionId === s.id && activeView === "chat"
-                  ? "bg-[#EAE3D9] text-[#1E1A17] font-semibold"
+                  ? "bg-[#EAE3D9] text-[#1E1A17] font-medium"
                   : "text-stone-600 hover:bg-[#F3EDE4] hover:text-stone-900"
               }`}
             >
@@ -1015,12 +1041,13 @@ All clauses have been verified against the Central Government Knowledge Base.`,
         </div>
 
         {/* Bottom: Settings & User Profile */}
-        <div className="p-3 border-t border-[#EAE3D9] space-y-2">
+        <div className="px-3 py-3 border-t border-[#EAE3D9] space-y-1">
+
           <button
             onClick={() => setActiveView("settings")}
-            className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+            className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-[13px] font-medium transition-colors cursor-pointer ${
               activeView === "settings"
-                ? "bg-[#EFE9E0] text-[#5D2A18] font-bold"
+                ? "bg-[#EFE9E0] text-[#5D2A18]"
                 : "text-stone-600 hover:bg-[#F3EDE4] hover:text-stone-900"
             }`}
           >
@@ -1084,52 +1111,19 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             </h1>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-full bg-[#5D2A18] text-white flex items-center justify-center font-bold text-xs">
-              {user?.fullName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || "U"}
-            </div>
-          </div>
         </header>
 
         {/* VIEW 1: AI CHAT CONVERSATION */}
         {activeView === "chat" && (
-          <div className="flex-1 flex flex-col h-full overflow-hidden relative">
-            {/* Messages Scroll Area */}
-            <div className="flex-1 overflow-y-auto px-4 py-6 md:py-8 space-y-6">
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+            {/* Messages Area */}
+            <div ref={messagesEndRef} className="flex-1 overflow-y-auto px-4 pt-6 md:pt-8 min-h-0">
               {(!currentSession?.messages || currentSession.messages.length === 0) ? (
-                /* Empty Chat State */
-                <div className="h-full flex flex-col items-center justify-center max-w-xl mx-auto text-center my-auto py-12">
-                  <div className="w-12 h-12 rounded-2xl bg-[#EFE9E0] flex items-center justify-center text-[#5D2A18] mb-4 shadow-xs">
-                    <PillarLogoIcon className="w-7 h-7 text-[#5D2A18]" />
-                  </div>
-                  <h2 className="text-2xl font-bold text-stone-900 tracking-tight">
-                    How can I help you?
-                  </h2>
-                  <p className="text-xs sm:text-sm text-stone-500 mt-1 mb-8">
-                    Ask questions about your government documents.
-                  </p>
-
-                  {/* 4 Clean Suggestion Chips */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full">
-                    {[
-                      "What changed between the 2024 and 2025 education policy notifications?",
-                      "Summarize the revised Direct Tax Rule 37BB provisions.",
-                      "What is the eligibility for PMAY-G Phase III subsidy?",
-                      "Which document introduced the mandatory FHIR standard?",
-                    ].map((prompt, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => handleSendMessage(prompt)}
-                        className="p-3 text-left bg-white hover:bg-[#F7F2EA] border border-[#E8E2D8] hover:border-[#D8CFBF] rounded-xl text-xs text-stone-700 transition-all duration-150 cursor-pointer shadow-xs"
-                      >
-                        {prompt}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                /* Empty Chat State — just blank */
+                <div />
               ) : (
                 /* Active Conversation Stream */
-                <div className="max-w-3xl mx-auto space-y-6 pb-24">
+                <div className="max-w-3xl mx-auto flex flex-col gap-4">
                   {hasMoreMessages && (
                     <div className="flex justify-center pt-1 pb-3">
                       <button
@@ -1169,47 +1163,10 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                           </div>
 
                           <div className="flex-1 space-y-3 overflow-hidden">
-                            {/* Collapsible High-Level Safe Agent Activity */}
-                            {msg.processingStages && msg.processingStages.length > 0 && (
-                              <div className="p-2.5 bg-[#FAF4EC] border border-[#EADBCC] rounded-xl text-xs text-[#5D2A18] space-y-1 max-w-sm">
-                                <div className="font-bold flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-[#8C4A32]">
-                                  <Sparkles className="w-3 h-3" />
-                                  <span>Document Retrieval Complete</span>
-                                </div>
-                                <div className="space-y-0.5 text-[11px] text-stone-600">
-                                  {msg.processingStages.map((stage, i) => (
-                                    <div key={i} className="flex items-center gap-1.5">
-                                      <Check className="w-3 h-3 text-emerald-600" />
-                                      <span>{stage}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
                             {/* Cited Assistant Content */}
                             <div className="bg-white border border-[#E8E2D8] p-5 rounded-2xl shadow-xs">
                               {renderMessageContent(msg.content, msg.citations)}
                             </div>
-
-                            {/* Follow-up Prompt Suggestions */}
-                            {(msg as any).followUps && (msg as any).followUps.length > 0 && (
-                              <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                                <span className="text-[10.5px] font-bold text-stone-400 uppercase tracking-wider mr-1">
-                                  Suggested Follow-ups:
-                                </span>
-                                {(msg as any).followUps.map((fu: string, fi: number) => (
-                                  <button
-                                    key={fi}
-                                    type="button"
-                                    onClick={() => handleSendMessage(fu)}
-                                    className="px-2.5 py-1 rounded-lg bg-[#FAF4EC] hover:bg-[#F0E6D8] text-[#5D2A18] text-[11px] font-medium border border-[#EADBCC] transition-colors cursor-pointer"
-                                  >
-                                    {fu} →
-                                  </button>
-                                ))}
-                              </div>
-                            )}
 
                             {/* Message Actions */}
                             <div className="flex items-center gap-1 text-stone-400 pl-1">
@@ -1249,44 +1206,19 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                       <div className="w-7 h-7 rounded-lg bg-[#5D2A18] text-white flex items-center justify-center flex-shrink-0 mt-0.5 shadow-xs">
                         <PillarLogoIcon className="w-4 h-4 text-white" />
                       </div>
-
-                      <div className="space-y-2 max-w-sm">
-                        <div className="p-3 bg-white border border-[#E8E2D8] rounded-2xl shadow-xs space-y-1.5 text-xs text-stone-700">
-                          <div className="font-semibold text-[#5D2A18] flex items-center gap-2">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[#5D2A18]" />
-                            <span>Analyzing your documents...</span>
-                          </div>
-
-                          <div className="space-y-1 text-[11.5px] text-stone-500 pt-1">
-                            <div className={`flex items-center gap-1.5 ${processingStep >= 1 ? "text-emerald-700 font-medium" : "opacity-40"}`}>
-                              {processingStep >= 1 ? <Check className="w-3 h-3 text-emerald-600" /> : <div className="w-3 h-3 rounded-full border border-stone-300" />}
-                              <span>Finding relevant documents</span>
-                            </div>
-                            <div className={`flex items-center gap-1.5 ${processingStep >= 2 ? "text-emerald-700 font-medium" : "opacity-40"}`}>
-                              {processingStep >= 2 ? <Check className="w-3 h-3 text-emerald-600" /> : <div className="w-3 h-3 rounded-full border border-stone-300" />}
-                              <span>Retrieving relevant provisions</span>
-                            </div>
-                            <div className={`flex items-center gap-1.5 ${processingStep >= 3 ? "text-emerald-700 font-medium" : "opacity-40"}`}>
-                              {processingStep >= 3 ? <Check className="w-3 h-3 text-emerald-600" /> : <div className="w-3 h-3 rounded-full border border-stone-300" />}
-                              <span>Verifying evidence</span>
-                            </div>
-                            <div className={`flex items-center gap-1.5 ${processingStep >= 4 ? "text-emerald-700 font-medium" : "opacity-40"}`}>
-                              {processingStep >= 4 ? <Check className="w-3 h-3 text-emerald-600" /> : <div className="w-3 h-3 rounded-full border border-stone-300" />}
-                              <span>Preparing cited answer</span>
-                            </div>
-                          </div>
-                        </div>
+                      <div className="px-4 py-3 bg-white border border-[#E8E2D8] rounded-2xl shadow-xs">
+                        <span className="text-sm text-stone-400 tracking-widest animate-pulse">...</span>
                       </div>
                     </div>
                   )}
 
-                  <div ref={messagesEndRef} />
+                  <div ref={messagesEndRef} className="h-0" />
                 </div>
               )}
             </div>
 
             {/* Bottom Floating Chat Composer */}
-            <div className="p-4 bg-gradient-to-t from-[#FAF8F5] via-[#FAF8F5]/90 to-transparent flex-shrink-0">
+            <div className="flex-shrink-0 px-4 pb-4 pt-1 bg-[#FAF8F5]">
               <div className="max-w-3xl mx-auto space-y-2">
                 {attachedDoc && (
                   <div className="flex items-center justify-between px-3 py-1.5 bg-[#FAF4EC] border border-[#EADBCC] rounded-xl text-xs text-[#5D2A18] shadow-2xs animate-in fade-in duration-150">
@@ -1319,7 +1251,7 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                     className="p-2 text-stone-400 hover:text-[#5D2A18] hover:bg-[#FAF8F5] rounded-xl transition-colors cursor-pointer"
                     title="Attach local document from PC"
                   >
-                    <Paperclip className="w-4 h-4" />
+                    <Plus className="w-4 h-4" />
                   </button>
 
                   <input
@@ -1339,11 +1271,6 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                   </button>
                 </form>
 
-                <p className="text-[11px] text-center text-stone-400 font-normal">
-                  {attachedDoc
-                    ? "Grounded in your attached document & sovereign knowledge base."
-                    : "Answers are grounded in your indexed government documents."}
-                </p>
               </div>
             </div>
           </div>
