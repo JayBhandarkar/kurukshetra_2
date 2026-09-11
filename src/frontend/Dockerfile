@@ -1,0 +1,28 @@
+FROM node:20-bookworm-slim AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+
+ARG NEXT_PUBLIC_SUPABASE_URL=https://ksojzigooagnczzxyadb.supabase.co
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtzb2p6aWdvb2FnbmN6enh5YWRiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkxMDU5ODEsImV4cCI6MjEwNDY4MTk4MX0.bR7Y06F0VVPB8UoSRXErBJcM2Gb303_p5HO-SJSRGcs
+ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+
+RUN npm run build
+
+FROM node:20-bookworm-slim AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+COPY --from=builder /app ./
+
+EXPOSE 3000
+
+CMD ["npm", "start"]

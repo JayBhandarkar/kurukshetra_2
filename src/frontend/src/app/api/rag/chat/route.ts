@@ -129,7 +129,8 @@ export async function POST(request: Request) {
 
     // 2. Try querying FastAPI Multi-Agent Microservice with Domain Profile
     try {
-      const aiFastApiRes = await fetch("http://localhost:8000/api/rag/query", {
+      const fastapiBase = process.env.FASTAPI_URL || "http://localhost:8000";
+      const aiFastApiRes = await fetch(`${fastapiBase}/api/rag/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

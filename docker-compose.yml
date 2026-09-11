@@ -55,6 +55,7 @@ services:
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - RESEND_API_KEY=${RESEND_API_KEY}
+      - FASTAPI_URL=http://fastapi_ai:8000
     depends_on:
       - fastapi_ai
     restart: always
