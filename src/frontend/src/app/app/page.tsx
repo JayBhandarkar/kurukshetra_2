@@ -390,31 +390,34 @@ export default function AuthenticatedApp() {
       setUser(session);
       setLoadingAuth(false);
 
-      // Check if user needs domain calibration onboarding
-      if (session.onboardingCompleted === false || session.onboardingCompleted === undefined) {
-        fetch(`/api/user/profile?email=${encodeURIComponent(session.email)}`)
-          .then((res) => res.json())
-          .then((data) => {
-            if (data.profile) {
-              if (!data.profile.onboarding_completed) {
-                setShowOnboardingModal(true);
-              } else {
-                const updatedSession = {
-                  ...session,
-                  primaryDomain: data.profile.primary_domain,
-                  role: data.profile.role,
-                  subscribedAuthorities: data.profile.subscribed_authorities,
-                  onboardingCompleted: true,
-                };
-                setUser(updatedSession);
-                setClientSession(updatedSession);
-              }
-            } else {
+      // Always verify onboarding status from API (never trust stale localStorage value)
+      fetch(`/api/user/profile?email=${encodeURIComponent(session.email)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.profile) {
+            if (!data.profile.onboarding_completed) {
               setShowOnboardingModal(true);
+            } else {
+              const updatedSession = {
+                ...session,
+                primaryDomain: data.profile.primary_domain,
+                role: data.profile.role,
+                subscribedAuthorities: data.profile.subscribed_authorities,
+                onboardingCompleted: true,
+              };
+              setUser(updatedSession);
+              setClientSession(updatedSession);
             }
-          })
-          .catch(() => setShowOnboardingModal(true));
-      }
+          } else {
+            setShowOnboardingModal(true);
+          }
+        })
+        .catch(() => {
+          // On network error, fall back to session value
+          if (session.onboardingCompleted === false || session.onboardingCompleted === undefined) {
+            setShowOnboardingModal(true);
+          }
+        });
 
       // 1. Fetch conversations from Keyset API
       fetch(`/api/conversations?userId=${encodeURIComponent(session.email)}&limit=25`)
@@ -930,7 +933,9 @@ All clauses have been verified against the Central Government Knowledge Base.`,
           {/* Brand Row */}
           <div className="flex items-center justify-between">
             <Link href="/app" className="flex items-center gap-2.5 group">
-              <PillarLogoIcon className="w-6 h-6 text-[#1E1A17] transition-transform group-hover:scale-105" />
+              <div className="w-8 h-8 rounded-xl bg-[#5D2A18] flex items-center justify-center flex-shrink-0 shadow-sm">
+                <PillarLogoIcon className="w-4 h-4 text-white" />
+              </div>
               <div className="flex flex-col">
                 <span className="font-extrabold text-[17px] tracking-tight text-[#1E1A17] leading-none">
                   Pramaan
@@ -1155,8 +1160,6 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#EFE9E0] hover:bg-[#E5DDD0] text-[11px] font-medium text-[#5D2A18] border border-[#DCD5C9] transition-all cursor-pointer shadow-2xs"
                 title="Click to change active domain search funnel"
               >
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                <span className="font-semibold text-stone-500 text-[10px]">Priority Focus:</span>
                 <span className="font-bold text-[#1E1A17] truncate max-w-[120px] sm:max-w-[210px]">
                   {user?.primaryDomain || "Banking, Finance & Tax"}
                 </span>
@@ -1264,48 +1267,42 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                       {msg.role === "user" ? (
                         /* User Message */
                         <div className="flex justify-end">
-                          <div className="bg-[#EFE9E0] text-[#1E1A17] px-4 py-3 rounded-2xl rounded-tr-xs text-sm max-w-[85%] sm:max-w-[75%] leading-relaxed font-medium">
+                          <div className="bg-[#EFE9E0] text-[#1E1A17] px-4 py-2.5 rounded-full text-sm max-w-[85%] sm:max-w-[75%] leading-relaxed font-medium">
                             {msg.content}
                           </div>
                         </div>
                       ) : (
                         /* Assistant Message */
-                        <div className="flex items-start gap-3">
-                          <div className="w-7 h-7 rounded-lg bg-[#5D2A18] text-white flex items-center justify-center flex-shrink-0 mt-0.5 shadow-xs">
-                            <PillarLogoIcon className="w-4 h-4 text-white" />
-                          </div>
-
+                        <div className="flex items-start">
                           <div className="flex-1 space-y-3 overflow-hidden">
-                            {/* Cited Assistant Content */}
+                            {/* Cited Assistant Content + Actions inside white box */}
                             <div className="bg-white border border-[#E8E2D8] p-5 rounded-2xl shadow-xs">
                               {renderMessageContent(msg.content, msg.citations)}
-                            </div>
-
-                            {/* Message Actions */}
-                            <div className="flex items-center gap-1 text-stone-400 pl-1">
-                              <button
-                                onClick={() => copyToClipboard(msg.content, msg.id)}
-                                className="p-1.5 hover:text-stone-700 hover:bg-[#EFE9E0] rounded-md transition-colors cursor-pointer"
-                                title="Copy answer"
-                              >
-                                {copiedMessageId === msg.id ? (
-                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
-                                ) : (
-                                  <Copy className="w-3.5 h-3.5" />
-                                )}
-                              </button>
-                              <button
-                                className="p-1.5 hover:text-stone-700 hover:bg-[#EFE9E0] rounded-md transition-colors cursor-pointer"
-                                title="Helpful"
-                              >
-                                <ThumbsUp className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                className="p-1.5 hover:text-stone-700 hover:bg-[#EFE9E0] rounded-md transition-colors cursor-pointer"
-                                title="Not helpful"
-                              >
-                                <ThumbsDown className="w-3.5 h-3.5" />
-                              </button>
+                              <div className="flex items-center gap-1 text-stone-400 mt-3 pt-3 border-t border-[#F0EBE3]">
+                                <button
+                                  onClick={() => copyToClipboard(msg.content, msg.id)}
+                                  className="p-1.5 hover:text-stone-700 hover:bg-[#EFE9E0] rounded-md transition-colors cursor-pointer"
+                                  title="Copy answer"
+                                >
+                                  {copiedMessageId === msg.id ? (
+                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                                <button
+                                  className="p-1.5 hover:text-stone-700 hover:bg-[#EFE9E0] rounded-md transition-colors cursor-pointer"
+                                  title="Helpful"
+                                >
+                                  <ThumbsUp className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  className="p-1.5 hover:text-stone-700 hover:bg-[#EFE9E0] rounded-md transition-colors cursor-pointer"
+                                  title="Not helpful"
+                                >
+                                  <ThumbsDown className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1316,7 +1313,7 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                   {/* Processing / Generating State */}
                   {isProcessing && (
                     <div className="flex items-start gap-3 animate-in fade-in duration-200">
-                      <div className="w-7 h-7 rounded-lg bg-[#5D2A18] text-white flex items-center justify-center flex-shrink-0 mt-0.5 shadow-xs">
+                      <div className="w-7 h-7 rounded-xl bg-[#5D2A18] flex items-center justify-center flex-shrink-0 mt-0.5 shadow-xs">
                         <PillarLogoIcon className="w-4 h-4 text-white" />
                       </div>
                       <div className="px-4 py-3 bg-white border border-[#E8E2D8] rounded-2xl shadow-xs">
@@ -1805,6 +1802,7 @@ All clauses have been verified against the Central Government Knowledge Base.`,
           userEmail={user.email}
           userFullName={user.fullName}
           initialRole={user.role}
+          onCancel={() => setShowOnboardingModal(false)}
           onComplete={(prefs: OnboardingPreferences) => {
             const updated = {
               ...user,
