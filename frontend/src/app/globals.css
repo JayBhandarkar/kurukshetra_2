@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-handwriting: var(--font-handwriting), cursive;
+  --color-brand-brown: #5D2A18;
+  --color-brand-brown-dark: #431D10;
+  --color-brand-brown-light: #F7EFE8;
+  --color-warm-bg: #FAF8F5;
+  --color-warm-card: #FFFFFF;
+  --color-warm-border: #E8E2D8;
+}
+
+:root {
+  --background: #FAF8F5;
+  --foreground: #1E1A17;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-handwriting {
+  font-family: var(--font-handwriting), cursive;
+}
+
+@keyframes float-slow {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes float-medium {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.animate-float-slow {
+  animation: float-slow 6s ease-in-out infinite;
+}
+
+.animate-float-medium {
+  animation: float-medium 7.5s ease-in-out infinite;
+}
+
+.animate-pulse-subtle {
+  animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
