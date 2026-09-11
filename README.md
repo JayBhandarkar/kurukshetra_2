@@ -30,14 +30,6 @@ Pramaan bridges the gap between complex government documents and actionable comp
 
 ---
 
-## 📸 Platform Overview
-
-| Public Portal Interface | Authenticated Workspace & Evidence Drawer |
-| :---: | :---: |
-| ![Pramaan Landing Page](screenshots/screenshot-1.png) | ![Pramaan AI Workspace](screenshots/screenshot-2.png) |
-
----
-
 ## ⚡ Key Capabilities
 
 ### 1. Evidence-Grounded Conversational Workspace (`/app`)
