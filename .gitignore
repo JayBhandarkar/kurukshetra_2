@@ -37,3 +37,14 @@ Thumbs.db
 *.tsbuildinfo
 next-env.d.ts
 
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+ENV/
+
+
+

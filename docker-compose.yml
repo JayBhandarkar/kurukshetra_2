@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # 1. Redis Broker & Result Backend
+  redis:
+    image: redis:7-alpine
+    container_name: pramaan_redis
+    ports:
+      - "6379:6379"
+    restart: always
+
+  # 2. FastAPI Document Intelligence Service
+  fastapi_ai:
+    build:
+      context: ./backend_ai
+      dockerfile: Dockerfile
+    container_name: pramaan_fastapi
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    depends_on:
+      - redis
+    restart: always
+
+  # 3. Celery Background Ingestion Worker
+  celery_worker:
+    build:
+      context: ./backend_ai
+      dockerfile: Dockerfile
+    container_name: pramaan_celery_worker
+    command: celery -A celery_app.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    depends_on:
+      - redis
+    restart: always
+
+  # 4. Next.js Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pramaan_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+    depends_on:
+      - fastapi_ai
+    restart: always
