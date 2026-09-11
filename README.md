@@ -81,35 +81,36 @@ flowchart TB
 ## 📁 Project Structure
 
 ```text
-kurukshetra/
-├── frontend/                     # Next.js Fullstack Web Application
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── page.tsx          # Landing Page (Pramaan Sovereign UI)
-│   │   │   ├── app/page.tsx      # Authenticated ChatGPT-Style AI Workspace
-│   │   │   ├── login/page.tsx    # Clean Minimalist Login
-│   │   │   ├── signup/page.tsx   # Minimalist Onboarding
-│   │   │   ├── verify/page.tsx   # 6-Digit Email Code Verification
-│   │   │   └── api/
-│   │   │       ├── auth/         # Login, Signup, Verify, Session APIs
-│   │   │       └── rag/          # /chat, /ingest, /crawl API routes
-│   │   ├── components/           # UI Components, Icons, Visuals
-│   │   └── lib/                  # Supabase Client, OpenAI Client, Auth Helpers
-│   └── package.json
+├── README.md                     # Platform Documentation & Guide
+├── LICENSE                       # Apache 2.0 / MIT Open Source License
+├── requirements.txt              # Root Python Dependencies
+├── package.json                  # Root Monorepo Scripts & Orchestration
+├── .gitignore                    # Git Exclusion Rules
 │
-├── backend_ai/                   # Python Document Intelligence & Celery Service
-│   ├── main.py                   # FastAPI REST API endpoints
-│   ├── extractor.py              # PyMuPDF & GPT-4o Vision OCR engine
-│   ├── crawler.py                # Sovereign Portal Crawler (egazette/pib)
-│   ├── agent.py                  # 6-Stage LangChain RAG Orchestrator
-│   ├── tasks.py                  # Background Celery ingestion tasks
-│   ├── celery_app.py             # Celery worker initialization
-│   ├── requirements.txt          # Python dependencies
-│   └── Dockerfile                # Backend containerization
+├── src/                          # Project Source Code
+│   ├── frontend/                 # Next.js 16 Web Application (App Router, UI, RAG Client)
+│   │   ├── src/app/              # Pages: Landing (/), Workspace (/app), Login (/login), API routes
+│   │   ├── src/components/       # Visuals, Icons, Layout Components
+│   │   └── src/lib/              # Supabase, OpenAI SDK, Auth Sessions
+│   ├── backend_ai/               # FastAPI Document Intelligence & Celery Service
+│   │   ├── main.py               # REST API Endpoints
+│   │   ├── extractor.py          # PyMuPDF & GPT-4o Vision OCR Engine
+│   │   ├── crawler.py            # Sovereign Portal Crawler (egazette/pib)
+│   │   ├── agent.py              # 6-Stage LangChain RAG Orchestrator
+│   │   └── tasks.py              # Background Celery Ingestion Workers
+│   └── backend/                  # Node.js Auth & Verification Service
 │
-├── docker-compose.yml            # Multi-container orchestration (FastAPI, Redis, Celery)
-├── REMAINING_TASKS.md            # Supabase SQL schema & task checklist
-└── README.md                     # Platform Documentation
+├── docs/                         # Documentation & Architecture
+│   ├── project-documentation.pdf # Comprehensive Technical Whitepaper
+│   ├── architecture.png          # System Architecture & Storage Tiering
+│   └── other-diagrams/           # Extended Data Flow & Sequence Diagrams
+│
+├── screenshots/                  # High-Resolution UI Walkthroughs
+│   ├── screenshot-1.png          # Landing Page (Pramaan Sovereign UI)
+│   └── screenshot-2.png          # Authenticated AI Workspace (ChatGPT-Style)
+│
+└── data/                         # Sovereign Datasets & Schemas
+    └── README.md                 # Gazette Crawl Targets & pgvector Schemas
 ```
 
 ---

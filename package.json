@@ -1,13 +1,13 @@
 {
   "name": "pramaan-monorepo",
   "version": "1.0.0",
-  "description": "Pramaan - Government Documents. Clearer Insights.",
+  "description": "Pramaan - Sovereign Government Document Intelligence Platform",
   "scripts": {
-    "dev": "npm --prefix frontend run dev",
-    "dev:frontend": "npm --prefix frontend run dev",
-    "dev:backend": "npm --prefix backend run dev",
-    "build": "npm --prefix frontend run build",
-    "start": "npm --prefix frontend run start",
-    "start:backend": "npm --prefix backend run start"
+    "dev": "npm --prefix src/frontend run dev",
+    "dev:frontend": "npm --prefix src/frontend run dev",
+    "dev:backend": "npm --prefix src/backend run dev",
+    "build": "npm --prefix src/frontend run build",
+    "start": "npm --prefix src/frontend run start",
+    "start:backend": "npm --prefix src/backend run start"
   }
 }

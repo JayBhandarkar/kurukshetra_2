@@ -12,7 +12,7 @@ services:
   # 2. FastAPI Document Intelligence Service
   fastapi_ai:
     build:
-      context: ./backend_ai
+      context: ./src/backend_ai
       dockerfile: Dockerfile
     container_name: pramaan_fastapi
     ports:
@@ -29,7 +29,7 @@ services:
   # 3. Celery Background Ingestion Worker
   celery_worker:
     build:
-      context: ./backend_ai
+      context: ./src/backend_ai
       dockerfile: Dockerfile
     container_name: pramaan_celery_worker
     command: celery -A celery_app.celery_app worker --loglevel=info --concurrency=2
@@ -45,7 +45,7 @@ services:
   # 4. Next.js Frontend
   frontend:
     build:
-      context: ./frontend
+      context: ./src/frontend
       dockerfile: Dockerfile
     container_name: pramaan_frontend
     ports:
