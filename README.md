@@ -1,43 +1,71 @@
-# Pramaan (प्रमाण) — Sovereign Government Document Intelligence & Agentic RAG Platform
+# Pramaan (प्रमाण)
+### Sovereign Government Document Intelligence & Verifiable Policy Retrieval Platform
 
-> **Understand Government Documents. Without the Paperwork.**  
-> A minimal, AI-first sovereign document intelligence system for Indian gazettes, ministry circulars, notifications, and statutory orders — grounded in verifiable evidence with clause-level citations.
-
----
-
-## 🏛 Overview
-
-**Pramaan** is an enterprise-grade document intelligence platform designed specifically for navigating complex Indian bureaucratic and legal documents. It combines sovereign web crawlers, hybrid OCR layout extraction, high-dimensional vector embeddings, and a 6-stage Agentic RAG orchestrator into a clean, distraction-free workspace.
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Next.js 16](https://img.shields.io/badge/Frontend-Next.js_16_(App_Router)-black)](https://nextjs.org/)
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
+[![pgvector](https://img.shields.io/badge/Database-PostgreSQL_+_pgvector-336791.svg)](https://github.com/pgvector/pgvector)
+[![OpenAI](https://img.shields.io/badge/AI-OpenAI_GPT--4o_Mini_|_Vision-412991.svg)](https://openai.com/)
 
 ---
 
-## ✨ Key Features
+## 🏛 Executive Summary
 
-- **💬 ChatGPT-Style AI Workspace (`/app`)**: 
-  - Focused, distraction-free conversational interface with collapsible navigation sidebar.
-  - Interactive verbatim citation badges linking directly to specific gazette pages and clauses.
-  - Slide-in **Evidence Drawer** showing exact excerpts, confidence scores, and PDF verification links.
+**Pramaan** (Sanskrit for *proof*, *evidence*, or *source of valid knowledge*) is a sovereign document intelligence and agentic retrieval platform engineered specifically for Indian government gazettes, ministry circulars, notifications, and statutory orders.
 
-- **🤖 6-Stage Agentic RAG Pipeline**:
-  1. *Query Understanding & Normalization*
-  2. *Orchestrator Agent & Intent Routing*
-  3. *Hybrid Dense (pgvector) + Sparse (BM25) Retrieval*
-  4. *Multi-Document Reasoning & Statutory Diffing*
-  5. *Evidence Validation & Hallucination Guardrails*
-  6. *Cited Answer Generation & Dynamic Follow-up Suggestions*
+Indian administrative and legal publications present significant challenges: thousands of daily notifications scattered across disparate departmental portals, complex legal cross-references across multiple fiscal years, and low-fidelity scanned physical documents with stamps and bilingual text.
 
-- **📄 Document Intelligence & Hybrid OCR**:
-  - **PyMuPDF (`fitz`)**: Instant sub-millisecond clause extraction for native digital PDFs.
-  - **GPT-4o Vision OCR**: High-accuracy parsing for scanned physical gazettes, tables, and stamped circulars.
+Pramaan bridges the gap between complex government documents and actionable compliance knowledge by pairing automated portal crawlers with hybrid document layout extraction (PyMuPDF + GPT-4o Vision), high-dimensional vector search (`pgvector`), and a multi-stage retrieval pipeline that enforces **verifiable, clause-level evidence attribution** with zero hallucination tolerance.
 
-- **🌐 Sovereign Portal Crawler**:
-  - Actively polls `egazette.gov.in`, `pib.gov.in`, and central ministry feeds.
-  - Automatic deduplication via SHA-256 hash and Gazette numbers.
-  - Live **Sync / Crawl Portals** on-demand trigger inside the Documents view.
+---
 
-- **⚖️ Statutory Diff Engine (`/app` ➔ Compare)**:
-  - Side-by-side comparison of revised notifications (e.g., 2024 vs 2025 Education Policy, PMAY-G phase norms).
-  - Highlights modified compliance clauses, enhanced financial caps, and removed mandates.
+## 🔍 The Problem & Architectural Vision
+
+| Challenge | Traditional Approach | Pramaan's Solution |
+| :--- | :--- | :--- |
+| **Document Fragmentation** | Manual search across dozens of ministry websites (eGazette, PIB, CBDT, MeitY). | **Automated Sovereign Crawlers** actively polling government feeds with deduplication and indexing. |
+| **Format Heterogeneity** | Standard OCR fails on low-contrast stamps, tables, and mixed Hindi/English text. | **Hybrid Extraction Engine** using PyMuPDF for native PDFs and GPT-4o Vision for scanned gazettes. |
+| **Statutory Cross-Referencing** | Time-consuming manual diffing of amendments across fiscal years. | **Statutory Comparison Engine** identifying modified clauses, altered thresholds, and deleted mandates. |
+| **LLM Hallucinations** | Generic AI answers with plausible-sounding but non-existent rules or dates. | **Deterministic Evidence Validation** with clickable clause citations and an interactive **Evidence Drawer**. |
+
+---
+
+## 📸 Platform Overview
+
+| Public Portal Interface | Authenticated Workspace & Evidence Drawer |
+| :---: | :---: |
+| ![Pramaan Landing Page](screenshots/screenshot-1.png) | ![Pramaan AI Workspace](screenshots/screenshot-2.png) |
+
+---
+
+## ⚡ Key Capabilities
+
+### 1. Evidence-Grounded Conversational Workspace (`/app`)
+- Distraction-free conversational interface designed specifically for regulatory and statutory analysis.
+- Every factual claim is embedded with a verifiable citation tag: `[Notification No. · Page · Section · Clause]`.
+- Clicking any citation badge opens the **Slide-in Evidence Drawer**, displaying the verbatim excerpt, confidence score, and a direct link to the original official PDF.
+
+### 2. Multi-Stage Agentic Retrieval Pipeline
+Unlike standard single-pass RAG systems that concatenate raw text chunks, Pramaan executes queries through six discrete verification stages:
+1. **Query Normalization**: Identifies Indian legal taxonomy, statutory circular identifiers, and ministry hierarchies.
+2. **Intent Routing**: Routes requests between single-document clause lookup, cross-year amendment diffing, and cross-ministry synthesis.
+3. **Hybrid Dense + Sparse Retrieval**: Executes 1536-dimensional cosine similarity searches over `pgvector` alongside metadata filters.
+4. **Multi-Document Reasoning**: Reconciles chronological amendments and superseding notifications.
+5. **Evidence Validation & Guardrails**: Enforces that generated statements are directly supported by retrieved gazette text.
+6. **Cited Synthesis**: Produces structured answers with interactive citations and dynamic follow-up recommendations.
+
+### 3. Hybrid Document Processing Engine
+- **PyMuPDF (`fitz`)**: Sub-millisecond layout extraction, paragraph chunking, and metadata parsing for digital-born PDFs.
+- **GPT-4o Vision OCR**: High-accuracy transcription and tabular data recovery for legacy scanned physical gazettes with administrative stamps and signatures.
+
+### 4. Sovereign Portal Ingestion & Active Crawling
+- Crawlers target official portals including `egazette.gov.in`, `pib.gov.in`, and central ministry feeds.
+- SHA-256 hash checking and gazette number indexing ensure zero redundant processing.
+- Supports both background Celery worker polling and on-demand UI synchronization via the **"Sync / Crawl Portals"** trigger.
+
+### 5. Statutory Comparison Engine (`/app` ➔ Compare)
+- Side-by-side analysis of policy iterations (e.g., *2024 vs 2025 Education Policy Notifications*, *PMAY-G phase norms*).
+- Highlights modified compliance clauses, revised fiscal caps, and newly introduced mandates.
 
 ---
 
@@ -46,20 +74,20 @@
 ```mermaid
 flowchart TB
     subgraph Ingestion Layer
-        A[Sovereign Portals\negazette.gov.in / pib.gov.in] -->|Scheduled Crawler| B[Ingestion Worker\nCelery + Redis]
-        U[User Uploads\nPDFs / Circulars] --> B
-        B --> C[Document Intelligence\nPyMuPDF + GPT-4o Vision]
-        C --> D[OpenAI Embeddings\ntext-embedding-3-small 1536d]
-        D --> E[(Supabase PostgreSQL\n+ pgvector)]
+        A["Official Portals\n(egazette.gov.in / pib.gov.in)"] -->|Scheduled Crawler| B["Ingestion Queue\n(Celery + Redis)"]
+        U["User Uploads\n(PDFs / Circulars)"] --> B
+        B --> C["Document Intelligence\n(PyMuPDF + GPT-4o Vision)"]
+        C --> D["Vector Embeddings\n(text-embedding-3-small 1536d)"]
+        D --> E[("Supabase PostgreSQL\n+ pgvector (HNSW Index)")]
     end
 
-    subgraph Agentic RAG & Serving
-        Q[User Query] --> F[Next.js App Router / FastAPI]
-        F --> G[6-Stage Agentic Orchestrator]
+    subgraph Retrieval & Serving Layer
+        Q["User Query"] --> F["Next.js App Router / FastAPI"]
+        F --> G["6-Stage Retrieval Orchestrator"]
         G <-->|HNSW Cosine Search| E
-        G --> H[GPT-4o Mini Synthesis]
-        H --> I[Verified Cited Response]
-        I --> J[Slide-in Evidence Drawer]
+        G --> H["Evidence Verification & Synthesis\n(GPT-4o Mini)"]
+        H --> I["Cited Structured Response"]
+        I --> J["Slide-in Evidence Drawer"]
     end
 ```
 
@@ -67,70 +95,74 @@ flowchart TB
 
 ## 🛠 Tech Stack
 
-| Layer | Technology |
-| :--- | :--- |
-| **Frontend** | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS, Lucide Icons |
-| **Backend / AI Microservice** | FastAPI, Python 3.11, PyMuPDF, LangChain, Celery, Redis |
-| **LLMs & Embeddings** | OpenAI `gpt-4o-mini`, `gpt-4o` Vision, `text-embedding-3-small` (1536d) |
-| **Database & Vector Store** | Supabase (PostgreSQL 15 + `pgvector` extension with HNSW index) |
-| **Auth & Email** | Custom Session Auth + Resend Transactional Verification Emails |
-| **Deployment** | Docker, Docker Compose, Vercel / Cloud Run |
+| Layer | Technology | Details |
+| :--- | :--- | :--- |
+| **Frontend** | Next.js 16 (App Router), React 19, TypeScript | Server and client components, Tailwind CSS styling |
+| **AI Microservice** | FastAPI, Python 3.11, Uvicorn | REST endpoints for extraction, vectorization, and RAG |
+| **Document Processing** | PyMuPDF (`fitz`), OpenAI GPT-4o Vision | Hybrid digital and scanned OCR layout extraction |
+| **Orchestration** | LangChain, Celery, Redis | Background task queuing, query normalization, routing |
+| **Models & Embeddings** | OpenAI `gpt-4o-mini`, `text-embedding-3-small` | 1536-dimensional dense vector embeddings |
+| **Database & Vector Store** | PostgreSQL 15 + `pgvector` (Supabase) | HNSW cosine similarity index for sub-15ms queries |
+| **Authentication & Delivery**| Custom Session Auth + Resend API | 6-digit email verification and session tokens |
+| **Deployment** | Docker, Docker Compose | Multi-container configuration for all services |
 
 ---
 
-## 📁 Project Structure
+## 📁 Repository Structure
 
 ```text
-├── README.md                     # Platform Documentation & Guide
-├── LICENSE                       # Apache 2.0 / MIT Open Source License
-├── requirements.txt              # Root Python Dependencies
-├── package.json                  # Root Monorepo Scripts & Orchestration
-├── .gitignore                    # Git Exclusion Rules
+├── README.md                     # Platform documentation and setup
+├── LICENSE                       # Apache 2.0 Open Source License
+├── requirements.txt              # Root Python dependencies for AI microservice
+├── package.json                  # Root monorepo scripts
+├── docker-compose.yml            # Multi-service container configuration
+├── .gitignore                    # Version control ignore rules
 │
-├── src/                          # Project Source Code
-│   ├── frontend/                 # Next.js 16 Web Application (App Router, UI, RAG Client)
-│   │   ├── src/app/              # Pages: Landing (/), Workspace (/app), Login (/login), API routes
-│   │   ├── src/components/       # Visuals, Icons, Layout Components
-│   │   └── src/lib/              # Supabase, OpenAI SDK, Auth Sessions
-│   ├── backend_ai/               # FastAPI Document Intelligence & Celery Service
-│   │   ├── main.py               # REST API Endpoints
-│   │   ├── extractor.py          # PyMuPDF & GPT-4o Vision OCR Engine
-│   │   ├── crawler.py            # Sovereign Portal Crawler (egazette/pib)
-│   │   ├── agent.py              # 6-Stage LangChain RAG Orchestrator
-│   │   └── tasks.py              # Background Celery Ingestion Workers
-│   └── backend/                  # Node.js Auth & Verification Service
+├── src/                          # Application source code
+│   ├── frontend/                 # Next.js 16 web application
+│   │   ├── src/app/              # App router pages: Landing (/), App (/app), Login (/login), API routes
+│   │   ├── src/components/       # UI components, icons, and layout visuals
+│   │   └── src/lib/              # Supabase client, OpenAI client, and auth helpers
+│   ├── backend_ai/               # FastAPI microservice and Celery workers
+│   │   ├── main.py               # REST API endpoints
+│   │   ├── extractor.py          # PyMuPDF and Vision OCR processing
+│   │   ├── crawler.py            # Sovereign portal crawler service
+│   │   ├── agent.py              # Multi-stage retrieval orchestrator
+│   │   ├── tasks.py              # Async Celery ingestion tasks
+│   │   └── celery_app.py         # Celery instance configuration
+│   └── backend/                  # Node.js authentication service
 │
-├── docs/                         # Documentation & Architecture
-│   ├── project-documentation.pdf # Comprehensive Technical Whitepaper
-│   ├── architecture.png          # System Architecture & Storage Tiering
-│   └── other-diagrams/           # Extended Data Flow & Sequence Diagrams
+├── docs/                         # Documentation and architectural diagrams
+│   ├── project-documentation.pdf # Complete technical whitepaper
+│   ├── architecture.png          # System architecture visual
+│   └── other-diagrams/           # Data flow and component diagrams
 │
-├── screenshots/                  # High-Resolution UI Walkthroughs
-│   ├── screenshot-1.png          # Landing Page (Pramaan Sovereign UI)
-│   └── screenshot-2.png          # Authenticated AI Workspace (ChatGPT-Style)
+├── screenshots/                  # High-resolution application captures
+│   ├── screenshot-1.png          # Public landing page
+│   └── screenshot-2.png          # Authenticated workspace interface
 │
-└── data/                         # Sovereign Datasets & Schemas
-    └── README.md                 # Gazette Crawl Targets & pgvector Schemas
+└── data/                         # Datasets and schemas
+    └── README.md                 # Table definitions and portal crawl targets
 ```
 
 ---
 
 ## ⚙️ Environment Configuration
 
-Create a `.env` file in the root and `frontend/.env.local` with the following keys:
+Create a `.env` file in the root directory (and `src/frontend/.env.local` for the Next.js app) with the following variables:
 
 ```env
-# Supabase PostgreSQL & pgvector
+# Database & Vector Store (Supabase PostgreSQL)
 NEXT_PUBLIC_SUPABASE_URL=https://<YOUR-PROJECT-ID>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 
-# OpenAI (Powers GPT-4o Mini, GPT-4o Vision OCR & text-embedding-3-small)
+# OpenAI (Powers reasoning, Vision OCR, and vector embeddings)
 OPENAI_API_KEY=sk-proj-your_openai_api_key
 
-# Resend Email Service (For verification codes)
+# Transactional Email (Resend)
 RESEND_API_KEY=re_your_resend_api_key
 
-# Redis (For background Celery crawler queue)
+# Background Task Queue (Redis)
 REDIS_URL=redis://localhost:6379/0
 ```
 
@@ -138,13 +170,13 @@ REDIS_URL=redis://localhost:6379/0
 
 ## 🗄️ Database Setup (Supabase pgvector)
 
-Run the following SQL migration in your **Supabase SQL Editor** to initialize the tables and vector search function:
+Run the following SQL migration in your **Supabase SQL Editor** to enable the vector extension and create the required tables and search function:
 
 ```sql
 -- 1. Enable pgvector extension
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- 2. Documents table
+-- 2. Documents metadata registry
 CREATE TABLE IF NOT EXISTS documents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT NOT NULL,
@@ -158,7 +190,7 @@ CREATE TABLE IF NOT EXISTS documents (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 3. Document chunks table with 1536-dim embeddings
+-- 3. Document chunks table with 1536-dimensional embeddings
 CREATE TABLE IF NOT EXISTS document_chunks (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
@@ -211,29 +243,35 @@ $$;
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Getting Started
 
 ### 1. Run the Frontend (Next.js)
 
 ```bash
-cd frontend
+# From repository root
+npm run dev
+
+# Or directly from the frontend directory
+cd src/frontend
 npm install
 npm run dev
 ```
-Open [http://localhost:3000](http://localhost:3000) to view the landing page, or [http://localhost:3000/app](http://localhost:3000/app) for the authenticated AI workspace.
+Open **`http://localhost:3000`** in your browser to view the application.
 
-### 2. Run the Backend AI Microservice (FastAPI + Celery)
+### 2. Run the AI Microservice (FastAPI + Celery)
 
 ```bash
-cd backend_ai
+cd src/backend_ai
 python -m venv .venv
-# On Windows: .venv\Scripts\activate | On Linux/macOS: source .venv/bin/activate
+
+# Activate virtual environment
+# Windows: .venv\Scripts\activate | macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 python main.py
 ```
-The FastAPI documentation will be available at [http://localhost:8000/docs](http://localhost:8000/docs).
+FastAPI interactive documentation will be accessible at **`http://localhost:8000/docs`**.
 
-### 3. Run with Docker Compose (Full Stack)
+### 3. Run Full Stack via Docker Compose
 
 ```bash
 docker-compose up --build
@@ -241,14 +279,14 @@ docker-compose up --build
 
 ---
 
-## 🔒 Security & Compliance
+## 🔒 Security, Sovereignty & Compliance
 
-- **Sovereignty**: Designed to operate with local or cloud sovereign data stores without leaking confidential government drafts.
-- **Verifiability**: Every AI generation enforces verbatim quotes and direct link mapping to official gazettes.
-- **Strict Guardrails**: Refuses speculative assertions that lack direct citation in indexed gazette notifications.
+- **Sovereign Data Handling**: Engineered for deployment on sovereign clouds without transmitting sensitive data outside designated boundaries.
+- **Strict Evidence Guardrails**: Rejects speculative assertions that cannot be directly mapped to an authoritative gazette notification.
+- **Auditability**: Every generated insight preserves end-to-end provenance with clause, section, and page coordinates.
 
 ---
 
 ## 📜 License
 
-Licensed under the [Apache License 2.0](LICENSE).
+This project is licensed under the **Apache License 2.0** — see the [LICENSE](LICENSE) file for details.
