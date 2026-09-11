@@ -116,9 +116,11 @@ export async function POST(request: Request) {
     const userId = reqUserId || "anonymous-user";
     let conversationId = reqConvId;
 
-    // Ensure active conversation exists
-    if (!conversationId) {
-      const newConv = await createConversation(userId, cleanQuery.slice(0, 48));
+    // Ensure active conversation exists in DB.
+    // Local draft sessions have ids like "session-<timestamp>" — not valid UUIDs.
+    // Create a real DB record for them so messages are persisted and appear in history.
+    if (!conversationId || conversationId.startsWith("session-")) {
+      const newConv = await createConversation(userId, cleanQuery.slice(0, 48), conversationId?.startsWith("session-") ? undefined : conversationId);
       conversationId = newConv.id;
     }
 

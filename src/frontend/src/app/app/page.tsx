@@ -390,14 +390,16 @@ export default function AuthenticatedApp() {
       setUser(session);
       setLoadingAuth(false);
 
-      // Always verify onboarding status from API (never trust stale localStorage value)
-      fetch(`/api/user/profile?email=${encodeURIComponent(session.email)}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.profile) {
-            if (!data.profile.onboarding_completed) {
-              setShowOnboardingModal(true);
-            } else {
+      // Check localStorage first — if user completed onboarding before, never show again
+      const onboardingKey = `pramaan_onboarding_done_${session.email}`;
+      const locallyCompleted = localStorage.getItem(onboardingKey) === "true";
+
+      if (locallyCompleted) {
+        // Already onboarded — just load profile preferences silently
+        fetch(`/api/user/profile?email=${encodeURIComponent(session.email)}`)
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.profile) {
               const updatedSession = {
                 ...session,
                 primaryDomain: data.profile.primary_domain,
@@ -408,16 +410,39 @@ export default function AuthenticatedApp() {
               setUser(updatedSession);
               setClientSession(updatedSession);
             }
-          } else {
-            setShowOnboardingModal(true);
-          }
-        })
-        .catch(() => {
-          // On network error, fall back to session value
-          if (session.onboardingCompleted === false || session.onboardingCompleted === undefined) {
-            setShowOnboardingModal(true);
-          }
-        });
+          })
+          .catch(() => {});
+      } else {
+        // First time or unknown — check DB
+        fetch(`/api/user/profile?email=${encodeURIComponent(session.email)}`)
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.profile) {
+              if (!data.profile.onboarding_completed) {
+                setShowOnboardingModal(true);
+              } else {
+                // DB says completed — save to localStorage so we skip the API next time
+                localStorage.setItem(onboardingKey, "true");
+                const updatedSession = {
+                  ...session,
+                  primaryDomain: data.profile.primary_domain,
+                  role: data.profile.role,
+                  subscribedAuthorities: data.profile.subscribed_authorities,
+                  onboardingCompleted: true,
+                };
+                setUser(updatedSession);
+                setClientSession(updatedSession);
+              }
+            } else {
+              setShowOnboardingModal(true);
+            }
+          })
+          .catch(() => {
+            if (session.onboardingCompleted !== true) {
+              setShowOnboardingModal(true);
+            }
+          });
+      }
 
       // 1. Fetch conversations from Keyset API
       fetch(`/api/conversations?userId=${encodeURIComponent(session.email)}&limit=25`)
@@ -514,13 +539,6 @@ export default function AuthenticatedApp() {
   };
 
   const startNewChat = async () => {
-    // If the active session is already empty, simply focus it without creating duplicates
-    if (currentSession && (!currentSession.messages || currentSession.messages.length === 0)) {
-      setActiveView("chat");
-      setActiveCitation(null);
-      return;
-    }
-
     const newId = `session-${Date.now()}`;
     const newSession: ChatSession = {
       id: newId,
@@ -529,15 +547,19 @@ export default function AuthenticatedApp() {
       docCount: 0,
       messages: [],
     };
-    // Keep past conversations that have messages + prepend new empty draft
-    const existingActive = sessions.filter((s) => s.messages && s.messages.length > 0);
-    const updated = [newSession, ...existingActive];
-    setSessions(updated);
+    // Keep all DB-persisted sessions (non "session-" id) + local sessions that have messages
+    // Drop any existing unsaved empty drafts to avoid accumulation
+    const existingActive = sessions.filter(
+      (s) => !s.id.startsWith("session-") || (s.messages && s.messages.length > 0)
+    );
+    setSessions([newSession, ...existingActive]);
     setCurrentSessionId(newId);
     setActiveView("chat");
     setActiveCitation(null);
     setHasMoreMessages(false);
     setMessagesCursor(null);
+    setInputQuery("");
+    setAttachedDoc(null);
   };
 
   const deleteSession = async (sessionId: string, e: React.MouseEvent) => {
@@ -735,11 +757,21 @@ export default function AuthenticatedApp() {
 
       const finalSession = {
         ...updatedSession,
+        // If the API assigned a real DB UUID (replacing our local "session-" draft id), use it
+        id: data.conversationId || updatedSession.id,
         docCount: data.citations?.length || 1,
         messages: [...updatedMessages, assistantMessage],
       };
 
-      setSessions(sessions.map((s) => (s.id === currentSessionId ? finalSession : s)));
+      // If the session ID changed (local draft → real DB UUID), update currentSessionId too
+      const prevId = currentSessionId;
+      const newId = finalSession.id;
+      setSessions((prev) =>
+        prev.map((s) => (s.id === prevId ? finalSession : s))
+      );
+      if (newId !== prevId) {
+        setCurrentSessionId(newId);
+      }
     } catch (err) {
       console.warn("Live RAG API fallback:", err);
       // High-precision fallback
@@ -1037,11 +1069,6 @@ All clauses have been verified against the Central Government Knowledge Base.`,
           </div>
           {(() => {
             const displaySessions = sessions
-              .filter(
-                (s) =>
-                  (s.messages && s.messages.length > 0) ||
-                  (s.title !== "New Conversation" && !s.id.startsWith("session-"))
-              )
               .filter((s) => !sidebarSearch || s.title.toLowerCase().includes(sidebarSearch.toLowerCase()));
 
             if (displaySessions.length === 0) {
@@ -1729,6 +1756,19 @@ All clauses have been verified against the Central Government Knowledge Base.`,
               </div>
 
               <div className="pt-4 border-t border-[#EAE3D9] space-y-1">
+                <h4 className="text-sm font-bold text-stone-900">Domain Preferences</h4>
+                <p className="text-xs text-stone-500">Current domain: <span className="font-semibold text-stone-700">{user?.primaryDomain || "Banking, Finance & Tax"}</span></p>
+                <div className="pt-3">
+                  <button
+                    onClick={() => setShowOnboardingModal(true)}
+                    className="px-3.5 py-1.5 bg-[#FAF4EC] hover:bg-[#F0E6D8] text-[#5D2A18] border border-[#E0C9B0] rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    Customize Domain Preferences
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-[#EAE3D9] space-y-1">
                 <h4 className="text-sm font-bold text-stone-900">Signed-in Account</h4>
                 <p className="text-xs text-stone-500">{user?.email}</p>
                 <div className="pt-3">
@@ -1823,7 +1863,13 @@ All clauses have been verified against the Central Government Knowledge Base.`,
           initialDomain={user.primaryDomain}
           initialRole={user.role}
           initialAuthorities={user.subscribedAuthorities}
-          onCancel={() => setShowOnboardingModal(false)}
+          onCancel={() => {
+            // Mark as dismissed permanently — don't show again
+            if (user?.email) {
+              localStorage.setItem(`pramaan_onboarding_done_${user.email}`, "true");
+            }
+            setShowOnboardingModal(false);
+          }}
           onComplete={(prefs: OnboardingPreferences) => {
             const updated = {
               ...user,
@@ -1835,6 +1881,23 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             setUser(updated);
             setClientSession(updated);
             setShowOnboardingModal(false);
+
+            // Mark as done in localStorage — this is the reliable gate
+            localStorage.setItem(`pramaan_onboarding_done_${user.email}`, "true");
+
+            // Also persist to DB best-effort
+            fetch("/api/user/profile", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                email: user.email,
+                full_name: user.fullName,
+                primary_domain: prefs.primaryDomain,
+                role: prefs.role,
+                subscribed_authorities: prefs.subscribedAuthorities,
+                onboarding_completed: true,
+              }),
+            }).catch((err) => console.warn("Failed to save onboarding preferences:", err));
           }}
         />
       )}
