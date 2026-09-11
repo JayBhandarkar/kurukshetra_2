@@ -1,7 +1,7 @@
 # ==========================================
 # Stage 1: Build Next.js Frontend
 # ==========================================
-FROM node:20-bookworm-slim AS frontend-builder
+FROM node:22-bookworm-slim AS frontend-builder
 WORKDIR /app/src/frontend
 
 # Install dependencies
@@ -13,8 +13,10 @@ COPY src/frontend ./
 
 ARG NEXT_PUBLIC_SUPABASE_URL=https://ksojzigooagnczzxyadb.supabase.co
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtzb2p6aWdvb2FnbmN6enh5YWRiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkxMDU5ODEsImV4cCI6MjEwNDY4MTk4MX0.bR7Y06F0VVPB8UoSRXErBJcM2Gb303_p5HO-SJSRGcs
+ARG OPENAI_API_KEY=dummy-build-key
 ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+ENV OPENAI_API_KEY=${OPENAI_API_KEY}
 
 RUN npm run build
 
@@ -41,8 +43,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20 runtime for Next.js
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+# Install Node.js 22 runtime for Next.js
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
