@@ -41,6 +41,7 @@ import {
   Loader2,
   Clock,
   ChevronLeft,
+  Trash2,
 } from "lucide-react";
 
 // Types
@@ -239,7 +240,7 @@ export default function AuthenticatedApp() {
 
   // Active Workspace Navigation View
   const [activeView, setActiveView] = useState<
-    "chat" | "documents" | "compare" | "sources" | "history" | "settings"
+    "chat" | "documents" | "compare" | "sources" | "settings"
   >("chat");
 
   // Sidebar toggle state
@@ -289,97 +290,20 @@ export default function AuthenticatedApp() {
     }
   };
 
-  // Chat Sessions History
-  const [sessions, setSessions] = useState<ChatSession[]>([
-    {
-      id: "session-1",
-      title: "Key changes in 2024 vs 2025 Education Policy",
-      lastUpdated: "Today",
-      docCount: 2,
-      messages: [
-        {
-          id: "msg-1",
-          role: "user",
-          content: "What changed between the 2024 and 2025 education policy notifications?",
-          timestamp: "10:32 AM",
-        },
-        {
-          id: "msg-2",
-          role: "assistant",
-          timestamp: "10:32 AM",
-          processingStages: [
-            "Finding relevant documents",
-            "Retrieving relevant provisions",
-            "Verifying evidence",
-            "Preparing cited answer",
-          ],
-          citations: [
-            CITATION_STORE["cite-edu-2025"],
-            CITATION_STORE["cite-edu-exp"],
-            CITATION_STORE["cite-edu-exemption"],
-          ],
-          content: `### Key changes
+  // Account-Scoped Persistent Chat Sessions
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string>("");
 
-The 2025 notification introduces three significant changes:
-
-**1. Application deadline**
-The deadline for institutional compliance and accreditation filing increased from 30 days to 45 days.
-[[cite-edu-2025]]
-
-**2. Eligibility criteria**
-The minimum required continuous institutional experience increased from 2 years to 3 years.
-[[cite-edu-exp]]
-
-**3. Exemption**
-The previous transitional exemption for Category X standalone technical institutes was removed.
-[[cite-edu-exemption]]
-
-All provisions are legally enforceable across central and state-funded institutions.`,
-        },
-      ],
-    },
-    {
-      id: "session-2",
-      title: "Summarize Direct Tax TDS digital e-verification",
-      lastUpdated: "Yesterday",
-      docCount: 1,
-      messages: [
-        {
-          id: "msg-201",
-          role: "user",
-          content: "How does the revised Rule 37BB affect software service exporters?",
-          timestamp: "Yesterday",
-        },
-        {
-          id: "msg-202",
-          role: "assistant",
-          timestamp: "Yesterday",
-          citations: [CITATION_STORE["cite-fin-tds"]],
-          content: `### Direct Tax Rule 37BB Provisions
-
-Under Circular No. 04/2025, software service exporters benefit from two major procedural simplifications:
-
-1. **Digital e-Verification**: Physical submission of Form 15CA/CB is replaced by 100% cryptographic tokens via DigiLocker API.
-[[cite-fin-tds]]
-
-2. **Fast-track Nil/Lower Deduction**: Certificates are processed by the Assessing Officer within 15 working days.`,
-        },
-      ],
-    },
-    {
-      id: "session-3",
-      title: "PMAY-G Phase III subsidy & geotagging norms",
-      lastUpdated: "Aug 10",
-      docCount: 3,
-      messages: [],
-    },
-  ]);
-
-  const [currentSessionId, setCurrentSessionId] = useState<string>("session-1");
-  const currentSession = sessions.find((s) => s.id === currentSessionId) || sessions[0];
+  const currentSession: ChatSession = sessions.find((s) => s.id === currentSessionId) || sessions[0] || {
+    id: "default-session",
+    title: "New Conversation",
+    lastUpdated: "Just now",
+    docCount: 0,
+    messages: [],
+  };
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Check auth session
+  // Check auth session & hydrate account-scoped chat history
   useEffect(() => {
     const session = getClientSession();
     if (!session?.email) {
@@ -387,8 +311,43 @@ Under Circular No. 04/2025, software service exporters benefit from two major pr
     } else {
       setUser(session);
       setLoadingAuth(false);
+
+      // Load saved conversation history for this specific account
+      const storageKey = `pramaan_chat_sessions_${session.email}`;
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          const parsed: ChatSession[] = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setSessions(parsed);
+            setCurrentSessionId(parsed[0].id);
+            return;
+          }
+        } catch (e) {
+          console.warn("Could not parse saved chat sessions:", e);
+        }
+      }
+
+      // If no past sessions exist, start with a clean new conversation
+      const freshId = `session-${Date.now()}`;
+      const freshSession: ChatSession = {
+        id: freshId,
+        title: "New Conversation",
+        lastUpdated: "Just now",
+        docCount: 0,
+        messages: [],
+      };
+      setSessions([freshSession]);
+      setCurrentSessionId(freshId);
     }
   }, [router]);
+
+  // Persist sessions whenever they change
+  useEffect(() => {
+    if (user?.email && sessions.length > 0) {
+      localStorage.setItem(`pramaan_chat_sessions_${user.email}`, JSON.stringify(sessions));
+    }
+  }, [sessions, user?.email]);
 
   // Scroll to bottom when messages update
   useEffect(() => {
@@ -404,15 +363,41 @@ Under Circular No. 04/2025, software service exporters benefit from two major pr
     const newId = `session-${Date.now()}`;
     const newSession: ChatSession = {
       id: newId,
-      title: "New Analysis",
+      title: "New Conversation",
       lastUpdated: "Just now",
       docCount: 0,
       messages: [],
     };
-    setSessions([newSession, ...sessions]);
+    const updated = [newSession, ...sessions];
+    setSessions(updated);
     setCurrentSessionId(newId);
     setActiveView("chat");
     setActiveCitation(null);
+    if (user?.email) {
+      localStorage.setItem(`pramaan_chat_sessions_${user.email}`, JSON.stringify(updated));
+    }
+  };
+
+  const deleteSession = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const filtered = sessions.filter((s) => s.id !== sessionId);
+    if (filtered.length === 0) {
+      const freshId = `session-${Date.now()}`;
+      const freshSession: ChatSession = {
+        id: freshId,
+        title: "New Conversation",
+        lastUpdated: "Just now",
+        docCount: 0,
+        messages: [],
+      };
+      setSessions([freshSession]);
+      setCurrentSessionId(freshId);
+    } else {
+      setSessions(filtered);
+      if (currentSessionId === sessionId) {
+        setCurrentSessionId(filtered[0].id);
+      }
+    }
   };
 
   const handleSendMessage = async (customPrompt?: string) => {
@@ -704,18 +689,6 @@ All clauses have been verified against the Central Government Knowledge Base.`,
               <Database className="w-4 h-4" />
               <span>Sources</span>
             </button>
-
-            <button
-              onClick={() => setActiveView("history")}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                activeView === "history"
-                  ? "bg-[#EFE9E0] text-[#5D2A18] font-bold"
-                  : "text-stone-700 hover:bg-[#F3EDE4] hover:text-stone-900"
-              }`}
-            >
-              <HistoryIcon className="w-4 h-4" />
-              <span>History</span>
-            </button>
           </nav>
         </div>
 
@@ -725,21 +698,29 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             Recent Analysis
           </div>
           {sessions.map((s) => (
-            <button
+            <div
               key={s.id}
               onClick={() => {
                 setCurrentSessionId(s.id);
                 setActiveView("chat");
                 setActiveCitation(null);
               }}
-              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[12px] truncate transition-colors cursor-pointer block ${
+              className={`group flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[12px] transition-colors cursor-pointer ${
                 currentSessionId === s.id && activeView === "chat"
                   ? "bg-[#EAE3D9] text-[#1E1A17] font-semibold"
                   : "text-stone-600 hover:bg-[#F3EDE4] hover:text-stone-900"
               }`}
             >
-              {s.title}
-            </button>
+              <span className="truncate flex-1 pr-1">{s.title}</span>
+              <button
+                type="button"
+                onClick={(e) => deleteSession(s.id, e)}
+                className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-700 rounded transition-opacity flex-shrink-0"
+                title="Delete conversation"
+              >
+                <Trash2 className="w-3 h-3 text-stone-400 hover:text-red-600" />
+              </button>
+            </div>
           ))}
         </div>
 
@@ -809,8 +790,6 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                 ? "Document Comparison"
                 : activeView === "sources"
                 ? "Official Sources"
-                : activeView === "history"
-                ? "Analysis History"
                 : "Workspace Settings"}
             </h1>
           </div>
@@ -1344,40 +1323,7 @@ All clauses have been verified against the Central Government Knowledge Base.`,
           </div>
         )}
 
-        {/* VIEW 5: HISTORY */}
-        {activeView === "history" && (
-          <div className="flex-1 overflow-y-auto p-6 md:p-8 max-w-4xl mx-auto w-full space-y-6">
-            <div className="border-b border-[#E8E2D8] pb-5">
-              <h2 className="text-xl font-bold text-stone-900 tracking-tight">Analysis History</h2>
-              <p className="text-xs text-stone-500 mt-0.5">
-                Review your previous conversations and cited analyses.
-              </p>
-            </div>
-
-            <div className="space-y-3">
-              {sessions.map((s) => (
-                <div
-                  key={s.id}
-                  onClick={() => {
-                    setCurrentSessionId(s.id);
-                    setActiveView("chat");
-                  }}
-                  className="bg-white border border-[#E8E2D8] hover:border-[#D8CFBF] p-4.5 rounded-2xl flex items-center justify-between shadow-xs cursor-pointer transition-colors"
-                >
-                  <div className="space-y-1">
-                    <h4 className="text-sm font-bold text-stone-900">{s.title}</h4>
-                    <p className="text-xs text-stone-500">
-                      {s.docCount > 0 ? `${s.docCount} documents cited` : "No citations yet"} · {s.lastUpdated}
-                    </p>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-stone-400" />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* VIEW 6: SETTINGS */}
+        {/* VIEW 5: SETTINGS */}
         {activeView === "settings" && (
           <div className="flex-1 overflow-y-auto p-6 md:p-8 max-w-3xl mx-auto w-full space-y-6">
             <div className="border-b border-[#E8E2D8] pb-5">
