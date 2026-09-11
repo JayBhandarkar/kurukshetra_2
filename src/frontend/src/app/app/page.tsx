@@ -255,6 +255,28 @@ export default function AuthenticatedApp() {
   const [processingStep, setProcessingStep] = useState<number>(0);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
+  // Local Document Attachment State
+  const [attachedDoc, setAttachedDoc] = useState<{ name: string; size: string; content: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = (event.target?.result as string) || "";
+      const sizeKB = (file.size / 1024).toFixed(1) + " KB";
+      setAttachedDoc({
+        name: file.name,
+        size: sizeKB,
+        content: content.slice(0, 45000),
+      });
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   // Compare Workspace State
   const [compareDocA, setCompareDocA] = useState("Notification No. 12/2024 (Education)");
   const [compareDocB, setCompareDocB] = useState("Notification No. 24/2025 (Education)");
@@ -294,6 +316,15 @@ export default function AuthenticatedApp() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
 
+  // Keyset Pagination States for Messages & Conversations
+  const [messagesCursor, setMessagesCursor] = useState<{ timestamp: string; id: string } | null>(null);
+  const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(false);
+  const [loadingMoreMessages, setLoadingMoreMessages] = useState<boolean>(false);
+
+  const [conversationsCursor, setConversationsCursor] = useState<{ timestamp: string; id: string } | null>(null);
+  const [hasMoreConversations, setHasMoreConversations] = useState<boolean>(false);
+  const [loadingMoreConversations, setLoadingMoreConversations] = useState<boolean>(false);
+
   const currentSession: ChatSession = sessions.find((s) => s.id === currentSessionId) || sessions[0] || {
     id: "default-session",
     title: "New Conversation",
@@ -302,6 +333,46 @@ export default function AuthenticatedApp() {
     messages: [],
   };
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Load messages for a specific conversation via Keyset API
+  const loadConversationMessages = async (convId: string, userEmail: string) => {
+    try {
+      const res = await fetch(`/api/conversations/${convId}/messages?userId=${encodeURIComponent(userEmail)}&limit=25`);
+      if (res.ok) {
+        const result = await res.json();
+        if (result.data && Array.isArray(result.data)) {
+          const mappedMessages: ChatMessage[] = result.data.map((m: any) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            citations: m.citations ? m.citations.map((c: any) => ({
+              id: c.id,
+              docTitle: c.doc_title,
+              ministry: c.ministry || "Government of India",
+              gazetteNumber: c.gazette_number || "Gazette Ref",
+              date: "Official",
+              page: c.page_number || 1,
+              section: c.section || "Section",
+              clause: c.clause || "Clause",
+              quote: c.quote,
+              confidence: c.confidence || 0.95,
+              pdfUrl: c.pdf_url || "https://egazette.gov.in",
+            })) : [],
+          }));
+
+          setSessions((prev) =>
+            prev.map((s) => (s.id === convId ? { ...s, messages: mappedMessages } : s))
+          );
+          setMessagesCursor(result.nextCursor);
+          setHasMoreMessages(result.hasMore);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch remote messages, using local store:", e);
+    }
+  };
 
   // Check auth session & hydrate account-scoped chat history
   useEffect(() => {
@@ -312,37 +383,73 @@ export default function AuthenticatedApp() {
       setUser(session);
       setLoadingAuth(false);
 
-      // Load saved conversation history for this specific account
-      const storageKey = `pramaan_chat_sessions_${session.email}`;
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        try {
-          const parsed: ChatSession[] = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setSessions(parsed);
-            setCurrentSessionId(parsed[0].id);
+      // 1. Fetch conversations from Keyset API
+      fetch(`/api/conversations?userId=${encodeURIComponent(session.email)}&limit=25`)
+        .then((res) => res.json())
+        .then((result) => {
+          if (result.data && Array.isArray(result.data) && result.data.length > 0) {
+            const fetchedSessions: ChatSession[] = result.data.map((c: any) => ({
+              id: c.id,
+              title: c.title,
+              lastUpdated: new Date(c.updated_at).toLocaleDateString([], { month: "short", day: "numeric" }),
+              docCount: 1,
+              messages: [],
+            }));
+            setSessions(fetchedSessions);
+            setCurrentSessionId(fetchedSessions[0].id);
+            setConversationsCursor(result.nextCursor);
+            setHasMoreConversations(result.hasMore);
+
+            // Load initial messages for active conversation
+            loadConversationMessages(fetchedSessions[0].id, session.email);
             return;
           }
-        } catch (e) {
-          console.warn("Could not parse saved chat sessions:", e);
-        }
-      }
 
-      // If no past sessions exist, start with a clean new conversation
-      const freshId = `session-${Date.now()}`;
-      const freshSession: ChatSession = {
-        id: freshId,
-        title: "New Conversation",
-        lastUpdated: "Just now",
-        docCount: 0,
-        messages: [],
-      };
-      setSessions([freshSession]);
-      setCurrentSessionId(freshId);
+          // Fallback to local storage or start clean
+          const storageKey = `pramaan_chat_sessions_${session.email}`;
+          const saved = localStorage.getItem(storageKey);
+          if (saved) {
+            try {
+              const parsed: ChatSession[] = JSON.parse(saved);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                setSessions(parsed);
+                setCurrentSessionId(parsed[0].id);
+                return;
+              }
+            } catch (e) {
+              console.warn("Could not parse saved chat sessions:", e);
+            }
+          }
+
+          // Start clean initial conversation
+          const freshId = `session-${Date.now()}`;
+          const freshSession: ChatSession = {
+            id: freshId,
+            title: "New Conversation",
+            lastUpdated: "Just now",
+            docCount: 0,
+            messages: [],
+          };
+          setSessions([freshSession]);
+          setCurrentSessionId(freshId);
+        })
+        .catch((err) => {
+          console.warn("Conversations API fallback:", err);
+          const freshId = `session-${Date.now()}`;
+          const freshSession: ChatSession = {
+            id: freshId,
+            title: "New Conversation",
+            lastUpdated: "Just now",
+            docCount: 0,
+            messages: [],
+          };
+          setSessions([freshSession]);
+          setCurrentSessionId(freshId);
+        });
     }
   }, [router]);
 
-  // Persist sessions whenever they change
+  // Persist sessions whenever they change to localStorage
   useEffect(() => {
     if (user?.email && sessions.length > 0) {
       localStorage.setItem(`pramaan_chat_sessions_${user.email}`, JSON.stringify(sessions));
@@ -359,7 +466,16 @@ export default function AuthenticatedApp() {
     router.push("/");
   };
 
-  const startNewChat = () => {
+  const selectConversation = (sessionId: string) => {
+    setCurrentSessionId(sessionId);
+    setActiveView("chat");
+    setActiveCitation(null);
+    if (user?.email) {
+      loadConversationMessages(sessionId, user.email);
+    }
+  };
+
+  const startNewChat = async () => {
     const newId = `session-${Date.now()}`;
     const newSession: ChatSession = {
       id: newId,
@@ -373,12 +489,21 @@ export default function AuthenticatedApp() {
     setCurrentSessionId(newId);
     setActiveView("chat");
     setActiveCitation(null);
+    setHasMoreMessages(false);
+    setMessagesCursor(null);
+
+    // Persist to backend
     if (user?.email) {
       localStorage.setItem(`pramaan_chat_sessions_${user.email}`, JSON.stringify(updated));
+      fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.email, title: "New Conversation", customId: newId }),
+      }).catch((e) => console.warn("Background conversation creation error:", e));
     }
   };
 
-  const deleteSession = (sessionId: string, e: React.MouseEvent) => {
+  const deleteSession = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const filtered = sessions.filter((s) => s.id !== sessionId);
     if (filtered.length === 0) {
@@ -397,6 +522,96 @@ export default function AuthenticatedApp() {
       if (currentSessionId === sessionId) {
         setCurrentSessionId(filtered[0].id);
       }
+    }
+
+    if (user?.email) {
+      fetch(`/api/conversations/${sessionId}?userId=${encodeURIComponent(user.email)}`, {
+        method: "DELETE",
+      }).catch((err) => console.warn("Delete conversation API error:", err));
+    }
+  };
+
+  // Keyset Pagination: Load Earlier Messages for Active Conversation
+  const loadEarlierMessages = async () => {
+    if (!messagesCursor || loadingMoreMessages || !user?.email) return;
+
+    setLoadingMoreMessages(true);
+    try {
+      const res = await fetch(
+        `/api/conversations/${currentSession.id}/messages?userId=${encodeURIComponent(user.email)}&cursorTimestamp=${encodeURIComponent(messagesCursor.timestamp)}&cursorId=${encodeURIComponent(messagesCursor.id)}&limit=25`
+      );
+
+      if (res.ok) {
+        const result = await res.json();
+        if (result.data && Array.isArray(result.data)) {
+          const olderMappedMessages: ChatMessage[] = result.data.map((m: any) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            citations: m.citations ? m.citations.map((c: any) => ({
+              id: c.id,
+              docTitle: c.doc_title,
+              ministry: c.ministry || "Government of India",
+              gazetteNumber: c.gazette_number || "Gazette Ref",
+              date: "Official",
+              page: c.page_number || 1,
+              section: c.section || "Section",
+              clause: c.clause || "Clause",
+              quote: c.quote,
+              confidence: c.confidence || 0.95,
+              pdfUrl: c.pdf_url || "https://egazette.gov.in",
+            })) : [],
+          }));
+
+          setSessions((prev) =>
+            prev.map((s) =>
+              s.id === currentSession.id
+                ? { ...s, messages: [...olderMappedMessages, ...s.messages] }
+                : s
+            )
+          );
+          setMessagesCursor(result.nextCursor);
+          setHasMoreMessages(result.hasMore);
+        }
+      }
+    } catch (e) {
+      console.warn("Load earlier messages error:", e);
+    } finally {
+      setLoadingMoreMessages(false);
+    }
+  };
+
+  // Keyset Pagination: Load More Conversations for Sidebar
+  const loadMoreConversations = async () => {
+    if (!conversationsCursor || loadingMoreConversations || !user?.email) return;
+
+    setLoadingMoreConversations(true);
+    try {
+      const res = await fetch(
+        `/api/conversations?userId=${encodeURIComponent(user.email)}&cursorTimestamp=${encodeURIComponent(conversationsCursor.timestamp)}&cursorId=${encodeURIComponent(conversationsCursor.id)}&limit=25`
+      );
+
+      if (res.ok) {
+        const result = await res.json();
+        if (result.data && Array.isArray(result.data)) {
+          const olderSessions: ChatSession[] = result.data.map((c: any) => ({
+            id: c.id,
+            title: c.title,
+            lastUpdated: new Date(c.updated_at).toLocaleDateString([], { month: "short", day: "numeric" }),
+            docCount: 1,
+            messages: [],
+          }));
+
+          setSessions((prev) => [...prev, ...olderSessions]);
+          setConversationsCursor(result.nextCursor);
+          setHasMoreConversations(result.hasMore);
+        }
+      }
+    } catch (e) {
+      console.warn("Load more conversations error:", e);
+    } finally {
+      setLoadingMoreConversations(false);
     }
   };
 
@@ -439,7 +654,14 @@ export default function AuthenticatedApp() {
       const res = await fetch("/api/rag/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: text.trim() }),
+        body: JSON.stringify({
+          query: text.trim(),
+          conversationId: currentSession.id,
+          userId: user?.email || "anonymous-user",
+          attachedDocument: attachedDoc
+            ? { name: attachedDoc.name, content: attachedDoc.content }
+            : null,
+        }),
       });
 
       const data = await res.json();
@@ -531,52 +753,114 @@ All clauses have been verified against the Central Government Knowledge Base.`,
     setTimeout(() => setCopiedMessageId(null), 2000);
   };
 
-  // Render assistant content with clickable citation pills
-  const renderMessageContent = (content: string, citations?: Citation[]) => {
-    if (!citations || citations.length === 0) {
-      return <div className="whitespace-pre-wrap leading-relaxed text-[14.5px]">{content}</div>;
+  // Render inline elements: **bold**, `code`, and [[cite-id]] interactive badges
+  const renderInlineContent = (text: string, citations?: Citation[]) => {
+    const parts = text.split(/(\[\[cite-[a-zA-Z0-9-]+\]\])/g);
+
+    return parts.map((part, idx) => {
+      const match = part.match(/\[\[(cite-[a-zA-Z0-9-]+)\]\]/);
+      if (match) {
+        const citeId = match[1];
+        const citation = CITATION_STORE[citeId] || citations?.find((c) => c.id === citeId);
+        if (!citation) return null;
+
+        const isSelected = activeCitation?.id === citation.id;
+
+        return (
+          <button
+            key={idx}
+            type="button"
+            onClick={() => setActiveCitation(citation)}
+            className={`inline-flex items-center gap-1.5 px-2 py-0.5 mx-1 my-0.5 rounded-md text-[11px] font-semibold font-mono transition-all cursor-pointer border ${
+              isSelected
+                ? "bg-[#5D2A18] text-white border-[#5D2A18] shadow-xs"
+                : "bg-[#F3EFEA] hover:bg-[#EAE3D9] text-[#5D2A18] border-[#E5DFD7] hover:border-[#D5CBC0]"
+            }`}
+            title="Click to view verified source evidence"
+          >
+            <BookOpen className="w-3 h-3" />
+            <span>
+              [{citation.docTitle ? citation.docTitle.split("(")[0].trim() : "Verified Doc"} {citation.page ? `· p.${citation.page}` : ""} {citation.section ? `· ${citation.section}` : ""}]
+            </span>
+          </button>
+        );
+      }
+
+      // Bold (**bold**) and inline code (`code`)
+      const boldParts = part.split(/(\*\*[^*]+\*\*)/g);
+      return (
+        <React.Fragment key={idx}>
+          {boldParts.map((bPart, bIdx) => {
+            if (bPart.startsWith("**") && bPart.endsWith("**")) {
+              return <strong key={bIdx} className="font-semibold text-stone-900">{bPart.slice(2, -2)}</strong>;
+            }
+            if (bPart.startsWith("`") && bPart.endsWith("`")) {
+              return <code key={bIdx} className="px-1.5 py-0.5 bg-stone-100 rounded text-xs font-mono text-[#5D2A18]">{bPart.slice(1, -1)}</code>;
+            }
+            return bPart;
+          })}
+        </React.Fragment>
+      );
+    });
+  };
+
+  // Render formatted lines (headers, bullets, numbered lists, paragraphs)
+  const renderFormattedLine = (line: string, citations?: Citation[]) => {
+    const trimmed = line.trim();
+
+    // 1. Markdown Headers (#, ##, ###, ####)
+    const headerMatch = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (headerMatch) {
+      const level = headerMatch[1].length;
+      const title = headerMatch[2];
+      if (level <= 2) {
+        return <h3 className="font-bold text-base text-stone-900 mt-3 mb-1">{renderInlineContent(title, citations)}</h3>;
+      }
+      return <h4 className="font-semibold text-sm text-stone-900 mt-2 mb-0.5">{renderInlineContent(title, citations)}</h4>;
     }
 
-    // Replace [[cite-id]] with interactive citation badge
-    const parts = content.split(/(\[\[cite-[a-zA-Z0-9-]+\]\])/g);
+    // 2. Bullet Lists (- or * or •)
+    const bulletMatch = trimmed.match(/^[\*\-•]\s+(.+)$/);
+    if (bulletMatch) {
+      return (
+        <div className="flex items-start gap-2 ml-2 my-0.5">
+          <span className="text-stone-400 mt-1.5 text-[6px]">●</span>
+          <span className="text-stone-800 leading-relaxed">{renderInlineContent(bulletMatch[1], citations)}</span>
+        </div>
+      );
+    }
+
+    // 3. Numbered Lists (1. 2. etc)
+    const numberMatch = trimmed.match(/^(\d+)[\.\)]\s+(.+)$/);
+    if (numberMatch) {
+      return (
+        <div className="flex items-start gap-2 ml-2 my-0.5">
+          <span className="font-semibold text-stone-600 text-xs mt-0.5 min-w-[16px]">{numberMatch[1]}.</span>
+          <span className="text-stone-800 leading-relaxed">{renderInlineContent(numberMatch[2], citations)}</span>
+        </div>
+      );
+    }
+
+    // 4. Regular Paragraph
+    return <p className="leading-relaxed text-stone-800 my-1">{renderInlineContent(line, citations)}</p>;
+  };
+
+  // Main Message Formatter
+  const renderMessageContent = (content: string, citations?: Citation[]) => {
+    if (!content) return null;
+
+    let clean = content.trim();
+    if (clean.startsWith("```json")) {
+      clean = clean.replace(/^```json\s*/, "").replace(/```$/, "").trim();
+    }
+
+    const lines = clean.split("\n");
 
     return (
-      <div className="space-y-3 text-[14.5px] leading-relaxed text-[#1E1A17]">
-        {parts.map((part, idx) => {
-          const match = part.match(/\[\[(cite-[a-zA-Z0-9-]+)\]\]/);
-          if (match) {
-            const citeId = match[1];
-            const citation = CITATION_STORE[citeId] || citations.find((c) => c.id === citeId);
-            if (!citation) return null;
-
-            const isSelected = activeCitation?.id === citation.id;
-
-            return (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setActiveCitation(citation)}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 my-1 rounded-md text-xs font-semibold font-mono transition-all cursor-pointer border ${
-                  isSelected
-                    ? "bg-[#5D2A18] text-white border-[#5D2A18] shadow-xs"
-                    : "bg-[#F3EFEA] hover:bg-[#EAE3D9] text-[#5D2A18] border-[#E5DFD7] hover:border-[#D5CBC0]"
-                }`}
-                title="Click to view verified source evidence"
-              >
-                <BookOpen className="w-3 h-3" />
-                <span>
-                  [{citation.docTitle.split("(")[0].trim()} · p.{citation.page} · {citation.section}]
-                </span>
-              </button>
-            );
-          }
-
-          // Regular markdown lines
-          return (
-            <div key={idx} className="whitespace-pre-wrap">
-              {part}
-            </div>
-          );
+      <div className="space-y-1 text-[14.5px] leading-relaxed text-[#1E1A17]">
+        {lines.map((line, idx) => {
+          if (!line.trim()) return <div key={idx} className="h-1" />;
+          return <React.Fragment key={idx}>{renderFormattedLine(line, citations)}</React.Fragment>;
         })}
       </div>
     );
@@ -637,59 +921,45 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             <span>New Analysis</span>
           </button>
 
-          {/* Navigation Links */}
-          <nav className="space-y-0.5 pt-2 border-t border-[#EAE3D9]">
-            <button
-              onClick={() => {
-                setActiveView("chat");
-                setActiveCitation(null);
-              }}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                activeView === "chat"
-                  ? "bg-[#EFE9E0] text-[#5D2A18] font-bold"
-                  : "text-stone-700 hover:bg-[#F3EDE4] hover:text-stone-900"
-              }`}
-            >
-              <MessageSquare className="w-4 h-4" />
-              <span>Ask Documents</span>
-            </button>
+          {/* Hidden File Input for Local Document Selection */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            accept=".pdf,.doc,.docx,.txt,.csv,.json,.md"
+            className="hidden"
+          />
 
-            <button
-              onClick={() => setActiveView("documents")}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                activeView === "documents"
-                  ? "bg-[#EFE9E0] text-[#5D2A18] font-bold"
-                  : "text-stone-700 hover:bg-[#F3EDE4] hover:text-stone-900"
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              <span>Documents</span>
-            </button>
+          {/* Select / Upload Local Document Button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-[#FAF4EC] hover:bg-[#F0E6D8] text-[#5D2A18] border border-[#EADBCC] rounded-xl text-xs font-semibold shadow-2xs transition-all duration-150 cursor-pointer"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>Select Local Document</span>
+          </button>
 
-            <button
-              onClick={() => setActiveView("compare")}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                activeView === "compare"
-                  ? "bg-[#EFE9E0] text-[#5D2A18] font-bold"
-                  : "text-stone-700 hover:bg-[#F3EDE4] hover:text-stone-900"
-              }`}
-            >
-              <ArrowLeftRight className="w-4 h-4" />
-              <span>Compare</span>
-            </button>
-
-            <button
-              onClick={() => setActiveView("sources")}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                activeView === "sources"
-                  ? "bg-[#EFE9E0] text-[#5D2A18] font-bold"
-                  : "text-stone-700 hover:bg-[#F3EDE4] hover:text-stone-900"
-              }`}
-            >
-              <Database className="w-4 h-4" />
-              <span>Sources</span>
-            </button>
-          </nav>
+          {/* Attached Document Indicator in Sidebar (if active) */}
+          {attachedDoc && (
+            <div className="flex items-center justify-between p-2 bg-white border border-[#E8E2D8] rounded-xl text-xs shadow-2xs">
+              <div className="flex items-center gap-1.5 overflow-hidden">
+                <FileText className="w-3.5 h-3.5 text-[#5D2A18] flex-shrink-0" />
+                <div className="overflow-hidden">
+                  <span className="block truncate font-medium text-stone-800 text-[11px]">{attachedDoc.name}</span>
+                  <span className="block text-[10px] text-stone-400">{attachedDoc.size}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAttachedDoc(null)}
+                className="p-1 text-stone-400 hover:text-red-600 rounded cursor-pointer"
+                title="Remove attached document"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Middle: Recent Chats List */}
@@ -722,6 +992,26 @@ All clauses have been verified against the Central Government Knowledge Base.`,
               </button>
             </div>
           ))}
+          {hasMoreConversations && (
+            <button
+              type="button"
+              onClick={loadMoreConversations}
+              disabled={loadingMoreConversations}
+              className="w-full py-1.5 px-2 mt-2 text-[11px] font-medium text-stone-500 hover:text-[#5D2A18] hover:bg-[#F3EDE4] rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              {loadingMoreConversations ? (
+                <>
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <span>Loading...</span>
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-3 h-3" />
+                  <span>Load more</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Bottom: Settings & User Profile */}
@@ -795,12 +1085,6 @@ All clauses have been verified against the Central Government Knowledge Base.`,
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Subtle Document Index Status Badge */}
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#EFE9E0] text-[11px] font-medium text-stone-600">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              <span>142 documents indexed</span>
-            </div>
-
             <div className="w-7 h-7 rounded-full bg-[#5D2A18] text-white flex items-center justify-center font-bold text-xs">
               {user?.fullName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || "U"}
             </div>
@@ -846,6 +1130,28 @@ All clauses have been verified against the Central Government Knowledge Base.`,
               ) : (
                 /* Active Conversation Stream */
                 <div className="max-w-3xl mx-auto space-y-6 pb-24">
+                  {hasMoreMessages && (
+                    <div className="flex justify-center pt-1 pb-3">
+                      <button
+                        type="button"
+                        onClick={loadEarlierMessages}
+                        disabled={loadingMoreMessages}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#EFE9E0] hover:bg-[#E5DDD0] text-stone-600 hover:text-[#5D2A18] text-xs font-medium transition-colors cursor-pointer shadow-2xs disabled:opacity-50"
+                      >
+                        {loadingMoreMessages ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Loading earlier messages...</span>
+                          </>
+                        ) : (
+                          <>
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Load earlier messages</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
                   {currentSession.messages.map((msg) => (
                     <div key={msg.id} className="space-y-2">
                       {msg.role === "user" ? (
@@ -982,6 +1288,24 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             {/* Bottom Floating Chat Composer */}
             <div className="p-4 bg-gradient-to-t from-[#FAF8F5] via-[#FAF8F5]/90 to-transparent flex-shrink-0">
               <div className="max-w-3xl mx-auto space-y-2">
+                {attachedDoc && (
+                  <div className="flex items-center justify-between px-3 py-1.5 bg-[#FAF4EC] border border-[#EADBCC] rounded-xl text-xs text-[#5D2A18] shadow-2xs animate-in fade-in duration-150">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <FileText className="w-3.5 h-3.5 text-[#5D2A18] flex-shrink-0" />
+                      <span className="font-semibold truncate max-w-[200px] sm:max-w-xs">{attachedDoc.name}</span>
+                      <span className="text-stone-400 text-[10.5px]">({attachedDoc.size}) · Attached as active context</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAttachedDoc(null)}
+                      className="p-1 text-stone-400 hover:text-red-700 rounded transition-colors cursor-pointer"
+                      title="Remove attached document"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -991,9 +1315,9 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                 >
                   <button
                     type="button"
-                    onClick={() => setActiveView("documents")}
-                    className="p-2 text-stone-400 hover:text-stone-700 hover:bg-[#FAF8F5] rounded-xl transition-colors cursor-pointer"
-                    title="Attach or select document"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-2 text-stone-400 hover:text-[#5D2A18] hover:bg-[#FAF8F5] rounded-xl transition-colors cursor-pointer"
+                    title="Attach local document from PC"
                   >
                     <Paperclip className="w-4 h-4" />
                   </button>
@@ -1002,7 +1326,7 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                     type="text"
                     value={inputQuery}
                     onChange={(e) => setInputQuery(e.target.value)}
-                    placeholder="Ask a question about your government documents..."
+                    placeholder={attachedDoc ? `Ask about "${attachedDoc.name}" or indexed documents...` : "Ask a question about your government documents..."}
                     className="flex-1 bg-transparent text-sm text-stone-900 placeholder-stone-400 focus:outline-none px-1"
                   />
 
@@ -1016,7 +1340,9 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                 </form>
 
                 <p className="text-[11px] text-center text-stone-400 font-normal">
-                  Answers are grounded in your indexed documents and include source references.
+                  {attachedDoc
+                    ? "Grounded in your attached document & sovereign knowledge base."
+                    : "Answers are grounded in your indexed government documents."}
                 </p>
               </div>
             </div>

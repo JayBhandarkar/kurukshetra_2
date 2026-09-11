@@ -69,8 +69,6 @@ export default function Home() {
     <div className="min-h-screen bg-[#FAF8F5] text-[#1E1A17] flex flex-col justify-between selection:bg-[#5D2A18] selection:text-white">
       {/* Top Navbar */}
       <Navbar
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
         onOpenGetStarted={() => setGetStartedOpen(true)}
       />
 

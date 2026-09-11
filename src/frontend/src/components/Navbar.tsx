@@ -9,14 +9,10 @@ import { supabase } from "@/lib/supabaseClient";
 
 interface NavbarProps {
   onOpenGetStarted?: () => void;
-  activeTab?: string;
-  onTabChange?: (tab: string) => void;
 }
 
 export function Navbar({
   onOpenGetStarted,
-  activeTab = "Home",
-  onTabChange,
 }: NavbarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [user, setUser] = useState<UserSession | null>(null);
@@ -62,15 +58,6 @@ export function Navbar({
     setUser(null);
   };
 
-  const navItems = ["Home", "Documents", "Compare", "About"];
-
-  const handleNavClick = (tab: string) => {
-    if (onTabChange) {
-      onTabChange(tab);
-    }
-    setMobileMenuOpen(false);
-  };
-
   return (
     <header className="w-full bg-[#FAF8F5]/90 backdrop-blur-md sticky top-0 z-40 border-b border-stone-200/50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
@@ -78,7 +65,6 @@ export function Navbar({
         <div className="flex items-center space-x-4">
           <Link
             href="/"
-            onClick={() => handleNavClick("Home")}
             className="flex items-center gap-2.5 group cursor-pointer"
           >
             <div className="p-1 rounded-md transition-transform group-hover:scale-105">
@@ -98,35 +84,12 @@ export function Navbar({
           </span>
         </div>
 
-        {/* Center/Right Nav links for Desktop */}
-        <nav className="hidden md:flex items-center gap-8 text-sm font-medium">
-          {navItems.map((item) => {
-            const isActive = activeTab === item;
-            return (
-              <button
-                key={item}
-                onClick={() => handleNavClick(item)}
-                className={`relative py-1 transition-colors cursor-pointer ${
-                  isActive
-                    ? "text-[#1E1A17] font-semibold"
-                    : "text-stone-600 hover:text-stone-900 font-medium"
-                }`}
-              >
-                {item}
-                {isActive && (
-                  <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#5D2A18] rounded-full" />
-                )}
-              </button>
-            );
-          })}
-        </nav>
-
         {/* Right Auth / CTA Area */}
         <div className="hidden sm:flex items-center gap-3">
           {user ? (
             <div className="flex items-center gap-3">
               <Link
-                href="/dashboard"
+                href="/app"
                 className="inline-flex items-center gap-2 bg-[#5D2A18] hover:bg-[#461F11] text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm hover:shadow transition-all duration-150 active:scale-95"
               >
                 <LayoutDashboard className="w-3.5 h-3.5" />
@@ -175,26 +138,11 @@ export function Navbar({
       {/* Mobile dropdown */}
       {mobileMenuOpen && (
         <div className="md:hidden border-b border-stone-200 bg-[#FAF8F5] px-4 pt-2 pb-6 space-y-3">
-          <div className="flex flex-col space-y-2">
-            {navItems.map((item) => (
-              <button
-                key={item}
-                onClick={() => handleNavClick(item)}
-                className={`text-left px-3 py-2 rounded-md text-base ${
-                  activeTab === item
-                    ? "bg-[#5D2A18]/10 text-[#5D2A18] font-semibold"
-                    : "text-stone-700 hover:bg-stone-100"
-                }`}
-              >
-                {item}
-              </button>
-            ))}
-          </div>
           <div className="pt-2 border-t border-stone-200/80 space-y-2">
             {user ? (
               <div className="space-y-2">
                 <Link
-                  href="/dashboard"
+                  href="/app"
                   onClick={() => setMobileMenuOpen(false)}
                   className="w-full flex items-center justify-center gap-2 bg-[#5D2A18] text-white py-2.5 px-4 rounded-lg font-medium text-sm"
                 >

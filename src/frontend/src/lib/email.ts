@@ -15,8 +15,10 @@ export async function sendVerificationEmail({
 }) {
   const greeting = name ? `Hello ${name},` : "Hello,";
 
+  const fromAddress = process.env.RESEND_FROM_EMAIL || "Pramaan <verify@pramaan.in>";
+
   return await resend.emails.send({
-    from: "Pramaan <onboarding@resend.dev>",
+    from: fromAddress,
     to: [to],
     subject: "Verify your email for Pramaan",
     html: `
