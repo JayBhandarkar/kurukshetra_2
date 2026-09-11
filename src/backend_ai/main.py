@@ -111,7 +111,47 @@ async def upload_user_document(
         file_size = len(file_bytes)
         sha256_hash = hashlib.sha256(file_bytes).hexdigest()
 
-        # 1. Upload to Supabase Storage
+        # 1. Deduplication & Cross-User Instant Reuse Check
+        try:
+            existing_res = supabase.from_("documents").select("id, title, file_url, extracted_json_url, metadata").eq("sha256_hash", sha256_hash).execute()
+            if existing_res.data and len(existing_res.data) > 0:
+                existing_doc = existing_res.data[0]
+                meta = existing_doc.get("metadata") or {}
+                existing_user = meta.get("user_id")
+
+                # Case A: Same user already uploaded this document
+                if existing_user and existing_user == user_id:
+                    return {
+                        "status": "ALREADY_EXISTS",
+                        "success": True,
+                        "document_id": existing_doc["id"],
+                        "title": filename,
+                        "sha256_hash": sha256_hash,
+                        "chunks_indexed": meta.get("total_chunks", 1),
+                        "file_url": existing_doc.get("file_url", ""),
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "message": f"Document '{filename}' is already indexed in your workspace."
+                    }
+
+                # Case B: Different user (or central sovereign gazette) uploaded it previously
+                # Instant 0-second reuse without duplicate DB collision or OpenAI cost
+                return {
+                    "status": "SUCCESS",
+                    "success": True,
+                    "reused": True,
+                    "document_id": existing_doc["id"],
+                    "title": filename,
+                    "sha256_hash": sha256_hash,
+                    "chunks_indexed": meta.get("total_chunks", 1),
+                    "file_url": existing_doc.get("file_url", ""),
+                    "user_id": user_id,
+                    "session_id": session_id
+                }
+        except Exception as check_err:
+            print(f"Hash existence check notice: {check_err}")
+
+        # 2. Upload to Supabase Storage
         sanitized_filename = filename.replace(" ", "_").replace("/", "_")
         storage_path = f"user_uploads/{user_id}/raw/{int(time.time())}_{sanitized_filename}"
         
