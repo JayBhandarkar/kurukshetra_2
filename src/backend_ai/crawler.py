@@ -2,6 +2,7 @@ import os
 import hashlib
 import json
 import re
+import urllib.parse
 import requests
 from bs4 import BeautifulSoup
 from typing import List, Dict, Any, Optional
@@ -19,9 +20,9 @@ supabase: Optional[Client] = create_client(SUPABASE_URL, SUPABASE_KEY) if (SUPAB
 
 class SovereignDocumentCrawler:
     """
-    Automated Crawler & Ingestion Pipeline:
-    1. Connects to Official Indian Government and Regulatory Portals.
-    2. Discovers new Gazettes, Acts, Rules, and Circulars.
+    Database-Driven Automated Crawler & Ingestion Pipeline:
+    1. Loads active crawl targets dynamically from PostgreSQL 'crawler_sources' table.
+    2. Discovers new Gazettes, Acts, Rules, and Circulars from active portal URLs in database.
     3. Downloads raw PDF binaries.
     4. Calculates cryptographic SHA-256 hash for deduplication.
     5. Extracts statutory structure via PyMuPDF (fitz) + automated Vision OCR.
@@ -30,143 +31,35 @@ class SovereignDocumentCrawler:
     8. Generates 1536-dim vector embeddings and inserts into pgvector.
     """
 
-    # -------------------------------------------------------------
-    # 1. Registered Official Government Portals & Source Feeds
-    # -------------------------------------------------------------
-    GOVERNMENT_PORTAL_REGISTRY = [
-        {
-            "name": "PRS Legislative Research (Parliament of India Repository)",
-            "domain": "prsindia.org",
-            "base_url": "https://prsindia.org/billtrack",
-            "category": "Central Acts, Bills & Statutory Amendments",
-            "ministry": "Parliament of India / Ministry of Law and Justice",
-            "active": True
-        },
-        {
-            "name": "eGazette of India (Official Sovereign Publication)",
-            "domain": "egazette.gov.in",
-            "base_url": "https://egazette.gov.in",
-            "category": "Gazette Extraordinary & Ordinary Notifications",
-            "ministry": "Ministry of Law and Justice",
-            "active": True
-        },
-        {
-            "name": "Ministry of Electronics & Information Technology (MeitY)",
-            "domain": "meity.gov.in",
-            "base_url": "https://www.meity.gov.in/notifications",
-            "category": "DPDP Rules, AI Directives, Digital India Policies",
-            "ministry": "Ministry of Electronics & IT (MeitY)",
-            "active": True
-        },
-        {
-            "name": "Indian Computer Emergency Response Team (CERT-In)",
-            "domain": "cert-in.org.in",
-            "base_url": "https://www.cert-in.org.in",
-            "category": "Cyber Security Directions & Incident Protocols",
-            "ministry": "Ministry of Electronics & IT (MeitY)",
-            "active": True
-        },
-        {
-            "name": "Reserve Bank of India (RBI Notifications & Master Directions)",
-            "domain": "rbi.org.in",
-            "base_url": "https://www.rbi.org.in/Scripts/NotificationUser.aspx",
-            "category": "Banking, Digital Payment Security & Lending Norms",
-            "ministry": "Ministry of Finance (RBI)",
-            "active": True
-        },
-        {
-            "name": "Central Board of Direct Taxes (CBDT / Income Tax)",
-            "domain": "incometaxindia.gov.in",
-            "base_url": "https://incometaxindia.gov.in/Pages/communications/circulars.aspx",
-            "category": "Direct Tax, TDS & Cross-Border Remittance Rules",
-            "ministry": "Ministry of Finance (CBDT)",
-            "active": True
-        },
-        {
-            "name": "Securities and Exchange Board of India (SEBI)",
-            "domain": "sebi.gov.in",
-            "base_url": "https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=1&ssid=7&smid=0",
-            "category": "LODR, BRSR ESG Mandates & Capital Markets",
-            "ministry": "Ministry of Finance (SEBI)",
-            "active": True
-        },
-        {
-            "name": "Ministry of Corporate Affairs (MCA & IBBI)",
-            "domain": "mca.gov.in",
-            "base_url": "https://www.mca.gov.in/content/mca/global/en/acts-rules/ebooks/notifications.html",
-            "category": "Companies Act Rules & Insolvency Regulations",
-            "ministry": "Ministry of Corporate Affairs",
-            "active": True
-        },
-        {
-            "name": "Press Information Bureau (PIB Releases)",
-            "domain": "pib.gov.in",
-            "base_url": "https://pib.gov.in",
-            "category": "Cabinet Decisions & Policy Releases",
-            "ministry": "Government of India",
-            "active": True
-        }
-    ]
+    @classmethod
+    def get_active_sources(cls) -> List[Dict[str, Any]]:
+        """
+        Dynamically fetches active government portal sources from PostgreSQL
+        """
+        if not supabase:
+            return []
+        try:
+            res = supabase.from_("crawler_sources").select("*").eq("is_active", True).execute()
+            return res.data or []
+        except Exception as e:
+            print(f"Error fetching crawler sources from database: {e}")
+            return []
 
-    # -------------------------------------------------------------
-    # 2. Curated Sovereign Documents Catalog
-    # -------------------------------------------------------------
-    OFFICIAL_PORTAL_CATALOG = [
-        {
-            "id": "dpdp-2023",
-            "title": "Digital Personal Data Protection Act, 2023",
-            "ministry": "Ministry of Electronics & Information Technology (MeitY)",
-            "doc_type": "Central Act / Gazette",
-            "gazette_number": "Act No. 22 of 2023",
-            "publication_date": "2023-08-11",
-            "pdf_url": "https://prsindia.org/files/bills_acts/bills_parliament/2023/Digital_Personal_Data_Protection_Act,_2023.pdf"
-        },
-        {
-            "id": "telecom-2023",
-            "title": "The Telecommunications Bill / Act, 2023",
-            "ministry": "Ministry of Communications",
-            "doc_type": "Central Act / Gazette",
-            "gazette_number": "Bill No. 175 of 2023",
-            "publication_date": "2023-12-18",
-            "pdf_url": "https://prsindia.org/files/bills_acts/bills_parliament/2023/The%20Telecommunications%20Bill,%202023.pdf"
-        },
-        {
-            "id": "cbdt-2024-cir24",
-            "title": "Income Tax (24th Amendment) Rules, 2024 — Cross-Border Remittance",
-            "ministry": "Ministry of Finance (CBDT)",
-            "doc_type": "Circular / Rule Notification",
-            "gazette_number": "CBDT/2024/CIR-24",
-            "publication_date": "2024-03-15",
-            "pdf_url": "https://incometaxindia.gov.in/communications/circulars/circular-24-2024.pdf"
-        },
-        {
-            "id": "moe-2024-nep08",
-            "title": "National Education Policy Multi-Disciplinary Credit Framework Guidelines",
-            "ministry": "Ministry of Education",
-            "doc_type": "Policy Guidelines",
-            "gazette_number": "MoE/2024/NEP-08",
-            "publication_date": "2024-01-20",
-            "pdf_url": "https://education.gov.in/sites/upload_files/mhrd/files/NEP_Credit_Framework_2024.pdf"
-        },
-        {
-            "id": "cert-2024-dir02",
-            "title": "Cyber Security Incident Reporting & CERT-In Directions 2024",
-            "ministry": "Ministry of Electronics & Information Technology (MeitY)",
-            "doc_type": "Statutory Direction",
-            "gazette_number": "CERT-In/2024/DIR-02",
-            "publication_date": "2024-02-10",
-            "pdf_url": "https://www.cert-in.org.in/PDF/CERT-In_Directions_70B_2024.pdf"
-        },
-        {
-            "id": "rbi-2024-03",
-            "title": "Master Direction — Reserve Bank of India (Digital Payment Security Controls) 2024",
-            "ministry": "Ministry of Finance (RBI)",
-            "doc_type": "Master Direction",
-            "gazette_number": "RBI/2024-25/03",
-            "publication_date": "2024-04-01",
-            "pdf_url": "https://rbi.org.in/scripts/BS_CircularIndexDisplay.aspx?Id=12450"
-        }
-    ]
+    @classmethod
+    def add_source(cls, name: str, base_url: str, ministry: str, category: str = "Government Circulars") -> Dict[str, Any]:
+        """
+        Dynamically registers a new government portal source in PostgreSQL
+        """
+        if not supabase:
+            raise RuntimeError("Database not configured.")
+        res = supabase.from_("crawler_sources").insert({
+            "name": name,
+            "base_url": base_url,
+            "ministry": ministry,
+            "category": category,
+            "is_active": True
+        }).execute()
+        return res.data[0] if res.data else {}
 
     @staticmethod
     def compute_sha256(data: bytes) -> str:
@@ -204,8 +97,8 @@ class SovereignDocumentCrawler:
         Download -> SHA256 -> Deduplicate -> PyMuPDF Extract -> Storage Upload (PDF + JSON) -> Database & Vectorize
         """
         url = doc_meta["pdf_url"]
-        title = doc_meta["title"]
-        ministry = doc_meta["ministry"]
+        title = doc_meta.get("title", "Official Gazette Notification")
+        ministry = doc_meta.get("ministry", "Government of India")
         gazette_number = doc_meta.get("gazette_number", "Unnumbered")
         publication_date = doc_meta.get("publication_date", "2024-01-01")
         doc_type = doc_meta.get("doc_type", "Gazette Notification")
@@ -316,7 +209,6 @@ class SovereignDocumentCrawler:
             })
 
         if chunk_rows:
-            # Batch insert in chunks of 50 to avoid request size limits
             batch_size = 50
             for i in range(0, len(chunk_rows), batch_size):
                 batch = chunk_rows[i:i + batch_size]
@@ -336,71 +228,94 @@ class SovereignDocumentCrawler:
         }
 
     @classmethod
-    def discover_live_parliament_acts(cls, limit: int = 5) -> List[Dict[str, Any]]:
+    def discover_documents_from_source(cls, source: Dict[str, Any], limit: int = 5) -> List[Dict[str, Any]]:
         """
-        Dynamically crawls PRS India live parliament bill repository to discover latest gazette acts
+        Dynamically discovers PDF documents from an active source record stored in PostgreSQL.
+        Parses page HTML and extracts linked PDF documents with titles.
         """
-        headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'}
-        try:
-            r = requests.get('https://prsindia.org/billtrack', headers=headers, timeout=10)
-            soup = BeautifulSoup(r.text, 'html.parser')
-            links = soup.find_all('a')
-            raw_links = [l['href'] for l in links if l.has_attr('href') and l['href'].startswith('/billtrack/') and '/category/' not in l['href'] and '/field_' not in l['href'] and l['href'] != '/billtrack']
-            unique_bills = list(dict.fromkeys(raw_links))
-
-            discovered = []
-            for b_path in unique_bills[:limit * 3]:
-                if len(discovered) >= limit:
-                    break
-                b_url = 'https://prsindia.org' + b_path
-                try:
-                    br = requests.get(b_url, headers=headers, timeout=5)
-                    bsoup = BeautifulSoup(br.text, 'html.parser')
-                    h1 = bsoup.find('h1')
-                    title = h1.get_text().strip() if h1 else b_path.replace('/billtrack/', '').replace('-', ' ').title()
-
-                    pdf_tags = bsoup.find_all('a', href=re.compile(r'\.pdf$', re.IGNORECASE))
-                    if not pdf_tags:
-                        continue
-                    pdf_url = pdf_tags[0]['href']
-                    if not pdf_url.startswith('http'):
-                        pdf_url = 'https://prsindia.org' + pdf_url
-
-                    chk = requests.head(pdf_url, headers=headers, timeout=5, allow_redirects=True)
-                    if chk.status_code != 200:
-                        continue
-
-                    discovered.append({
-                        'title': title,
-                        'ministry': 'Parliament of India',
-                        'doc_type': 'Central Gazette / Act',
-                        'gazette_number': f'PRS/ACT/' + b_path.replace('/billtrack/', '')[:15].upper(),
-                        'publication_date': '2023-08-15',
-                        'pdf_url': pdf_url
-                    })
-                except Exception:
-                    continue
-            return discovered
-        except Exception as e:
-            print(f"Live discovery warning: {e}")
+        base_url = source.get("base_url")
+        if not base_url:
             return []
 
+        ministry = source.get("ministry", "Government of India")
+        category = source.get("category", "Government Circular")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+
+        discovered: List[Dict[str, Any]] = []
+        try:
+            r = requests.get(base_url, headers=headers, timeout=15)
+            if r.status_code != 200:
+                print(f"Warning: Source {base_url} returned status code {r.status_code}")
+                return []
+
+            soup = BeautifulSoup(r.text, "html.parser")
+            pdf_links = soup.find_all("a", href=re.compile(r"\.pdf($|\?)", re.IGNORECASE))
+
+            seen_urls = set()
+            for tag in pdf_links:
+                if len(discovered) >= limit:
+                    break
+                
+                href = tag.get("href", "").strip()
+                if not href:
+                    continue
+
+                full_url = urllib.parse.urljoin(base_url, href)
+                if full_url in seen_urls:
+                    continue
+                seen_urls.add(full_url)
+
+                raw_title = tag.get_text().strip()
+                if not raw_title or len(raw_title) < 5:
+                    parent_text = tag.parent.get_text().strip() if tag.parent else ""
+                    raw_title = parent_text if 5 < len(parent_text) < 150 else urllib.parse.unquote(full_url.split("/")[-1].replace(".pdf", "").replace("-", " ").replace("_", " ").title())
+
+                discovered.append({
+                    "title": raw_title[:200],
+                    "ministry": ministry,
+                    "doc_type": category,
+                    "gazette_number": f"{cls.slugify(ministry)[:10].upper()}/{cls.compute_sha256(full_url.encode())[:8].upper()}",
+                    "publication_date": "2024-01-01",
+                    "pdf_url": full_url
+                })
+
+        except Exception as e:
+            print(f"Warning discovering documents from {base_url}: {e}")
+
+        return discovered
+
     @classmethod
-    def run_live_crawl(cls, limit: int = 5) -> Dict[str, Any]:
+    def run_live_crawl(cls, limit_per_source: int = 3) -> Dict[str, Any]:
         """
-        Executes discovery and ingestion across catalog and live feeds
+        Executes automated crawl by loading all active sources from PostgreSQL database,
+        discovering new documents dynamically, and ingesting them.
         """
+        active_sources = cls.get_active_sources()
+        print(f"📡 Loaded {len(active_sources)} active government crawl sources from PostgreSQL database.")
+
+        total_discovered = 0
         results = []
-        # Process catalog items
-        for item in cls.OFFICIAL_PORTAL_CATALOG[:limit]:
-            try:
-                res = cls.process_and_ingest_document(item)
-                results.append(res)
-            except Exception as err:
-                print(f"❌ Error processing {item['title']}: {err}")
-                results.append({"status": "FAILED", "title": item["title"], "error": str(err)})
+
+        for source in active_sources:
+            source_name = source.get("name", "Unknown Source")
+            print(f"🔍 Crawling active database source: {source_name}...")
+            discovered_docs = cls.discover_documents_from_source(source, limit=limit_per_source)
+            total_discovered += len(discovered_docs)
+
+            for item in discovered_docs:
+                try:
+                    res = cls.process_and_ingest_document(item)
+                    results.append(res)
+                except Exception as err:
+                    print(f"❌ Error processing {item.get('title')}: {err}")
+                    results.append({"status": "FAILED", "title": item.get("title"), "error": str(err)})
 
         return {
+            "active_sources_in_db": len(active_sources),
+            "discovered_documents": total_discovered,
             "processed": len(results),
             "details": results
         }
+
