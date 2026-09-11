@@ -77,20 +77,49 @@ export async function POST(request: Request) {
     // Mark email as verified
     markEmailVerified(cleanEmail);
 
-    // Fetch user details from signups table
-    let userData = { email: cleanEmail, fullName: cleanEmail.split("@")[0] };
+    // Fetch user details & profile from database
+    let profileData = null;
+    let role = "Policy Researcher / Legal";
+    let fullName = cleanEmail.split("@")[0];
+
     try {
       const { data } = await supabase
         .from("signups")
-        .select("email, full_name")
+        .select("email, full_name, role")
         .eq("email", cleanEmail)
         .single();
       if (data) {
-        userData = { email: data.email, fullName: data.full_name || data.email.split("@")[0] };
+        fullName = data.full_name || fullName;
+        role = data.role || role;
       }
     } catch (e) {
       console.warn("Could not fetch user name:", e);
     }
+
+    try {
+      const { data: prof } = await supabase
+        .from("user_profiles")
+        .select("*")
+        .eq("email", cleanEmail)
+        .maybeSingle();
+      profileData = prof;
+    } catch (profErr) {
+      console.warn("user_profiles lookup notice:", profErr);
+    }
+
+    const userData = {
+      email: cleanEmail,
+      fullName: profileData?.full_name || fullName,
+      role: profileData?.role || role,
+      primaryDomain: profileData?.primary_domain || "Banking, Finance & Tax",
+      subscribedAuthorities: profileData?.subscribed_authorities || [
+        "Reserve Bank of India (RBI)",
+        "Central Board of Direct Taxes (CBDT)",
+        "Ministry of Finance",
+      ],
+      onboardingCompleted: profileData ? Boolean(profileData.onboarding_completed) : false,
+      isVerified: true,
+    };
 
     return NextResponse.json({
       success: true,

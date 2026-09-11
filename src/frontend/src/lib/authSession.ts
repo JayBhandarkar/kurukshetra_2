@@ -6,6 +6,9 @@ export interface UserSession {
   fullName?: string;
   role?: string;
   isVerified: boolean;
+  primaryDomain?: string;
+  subscribedAuthorities?: string[];
+  onboardingCompleted?: boolean;
 }
 
 const AUTH_STORAGE_KEY = "policylens_user_session";

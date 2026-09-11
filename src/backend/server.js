@@ -62,6 +62,81 @@ app.post("/api/signups", async (req, res) => {
   }
 });
 
+// User Profile & Calibration Preferences Endpoint
+app.get("/api/user/profile", async (req, res) => {
+  try {
+    const email = (req.query.email || "").toLowerCase().trim();
+    if (!email) {
+      return res.status(400).json({ error: "Email query param is required" });
+    }
+
+    const { data, error } = await supabase
+      .from("user_profiles")
+      .select("*")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (error || !data) {
+      return res.json({
+        success: true,
+        profile: {
+          email,
+          role: "Policy Researcher / Legal",
+          primary_domain: "Banking, Finance & Tax",
+          subscribed_authorities: ["Reserve Bank of India (RBI)", "Central Board of Direct Taxes (CBDT)", "Ministry of Finance"],
+          onboarding_completed: false,
+        },
+      });
+    }
+
+    return res.json({ success: true, profile: data });
+  } catch (err) {
+    console.error("Profile GET error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/api/user/profile", async (req, res) => {
+  try {
+    const { email, primary_domain, role, subscribed_authorities, full_name, onboarding_completed } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const updatedProfile = {
+      email: cleanEmail,
+      user_id: cleanEmail,
+      full_name: full_name || cleanEmail.split("@")[0].title,
+      role: role || "Policy Researcher / Legal",
+      primary_domain: primary_domain || "Banking, Finance & Tax",
+      subscribed_authorities: Array.isArray(subscribed_authorities)
+        ? subscribed_authorities
+        : ["Reserve Bank of India (RBI)", "Central Board of Direct Taxes (CBDT)", "Ministry of Finance"],
+      onboarding_completed: onboarding_completed !== undefined ? Boolean(onboarding_completed) : true,
+      updated_at: new Date().toISOString(),
+    };
+
+    try {
+      const { data, error } = await supabase
+        .from("user_profiles")
+        .upsert([updatedProfile], { onConflict: "email" })
+        .select();
+
+      if (!error && data && data.length > 0) {
+        return res.json({ success: true, profile: data[0] });
+      }
+    } catch (dbErr) {
+      console.warn("Supabase upsert warning:", dbErr);
+    }
+
+    return res.json({ success: true, profile: updatedProfile });
+  } catch (err) {
+    console.error("Profile POST error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Document Search & Verification Endpoint
 app.get("/api/documents/search", async (req, res) => {
   const query = req.query.q || "";

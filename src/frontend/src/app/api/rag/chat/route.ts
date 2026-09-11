@@ -106,7 +106,7 @@ const DEFAULT_KNOWLEDGE_BASE = [
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { query, ministry, conversationId: reqConvId, userId: reqUserId, attachedDocument } = body;
+    const { query, ministry, conversationId: reqConvId, userId: reqUserId, attachedDocument, userProfile } = body;
 
     if (!query || typeof query !== "string") {
       return NextResponse.json({ error: "Query is required" }, { status: 400 });
@@ -125,7 +125,62 @@ export async function POST(request: Request) {
     // 1. Save User Question to normalized Messages table
     await saveMessageWithCitations(conversationId, "user", cleanQuery, []);
 
-    // 2. Generate 1536-dim Embedding with OpenAI
+    // 2. Try querying FastAPI Multi-Agent Microservice with Domain Profile
+    try {
+      const aiFastApiRes = await fetch("http://localhost:8000/api/rag/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: cleanQuery,
+          ministry: ministry && ministry !== "All" && ministry !== "All Ministries" ? ministry : null,
+          user_profile: userProfile || {
+            primary_domain: "Banking, Finance & Tax",
+            role: "Legal Counsel / Advocate",
+          },
+        }),
+        signal: AbortSignal.timeout(12000),
+      });
+
+      if (aiFastApiRes.ok) {
+        const aiData = await aiFastApiRes.json();
+        if (aiData && aiData.answer) {
+          const aiCitations = (aiData.citations || []).map((c: any) => ({
+            id: c.id,
+            doc_title: c.docTitle,
+            docTitle: c.docTitle,
+            ministry: c.ministry,
+            gazette_number: c.gazetteNumber,
+            gazetteNumber: c.gazetteNumber,
+            date: "Official",
+            page_number: c.page,
+            page: c.page,
+            section: c.section,
+            clause: c.clause,
+            quote: c.quote,
+            confidence: c.confidence,
+            pdf_url: c.pdfUrl || "https://egazette.gov.in",
+            pdfUrl: c.pdfUrl || "https://egazette.gov.in",
+          }));
+
+          await saveMessageWithCitations(conversationId, "assistant", aiData.answer, aiCitations);
+          triggerProgressiveSummarization(conversationId, userId).catch(() => {});
+
+          return NextResponse.json({
+            answer: aiData.answer,
+            citations: aiCitations,
+            intent: aiData.intent,
+            searchMode: aiData.searchMode,
+            primaryDomain: aiData.primaryDomain,
+            processingStages: aiData.processingStages,
+            followUps: aiData.followUps,
+          });
+        }
+      }
+    } catch (fastApiErr) {
+      console.warn("FastAPI AI microservice fallback notice:", fastApiErr);
+    }
+
+    // 3. Generate 1536-dim Embedding with OpenAI (Direct Fallback)
     let queryEmbedding: number[] | null = null;
     try {
       queryEmbedding = await createEmbedding(cleanQuery);

@@ -29,6 +29,7 @@ app.add_middleware(
 class RAGQueryRequest(BaseModel):
     query: str
     ministry: Optional[str] = None
+    user_profile: Optional[dict] = None
 
 class IngestAsyncRequest(BaseModel):
     pdf_url: str
@@ -79,9 +80,13 @@ async def extract_document(file: UploadFile = File(...)):
 @app.post("/api/rag/query")
 def query_rag(req: RAGQueryRequest):
     """
-    Execute 6-stage Agentic RAG pipeline using LangChain and Supabase pgvector
+    Execute 6-stage Multi-Agent RAG pipeline with Domain-First Funnel & Global Fallback
     """
-    result = AgenticRAGOrchestrator.query(user_query=req.query, ministry_filter=req.ministry)
+    result = AgenticRAGOrchestrator.query(
+        user_query=req.query,
+        ministry_filter=req.ministry,
+        user_profile=req.user_profile
+    )
     return result
 
 @app.post("/api/tasks/ingest")

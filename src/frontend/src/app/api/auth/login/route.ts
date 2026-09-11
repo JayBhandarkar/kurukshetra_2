@@ -60,12 +60,32 @@ export async function POST(request: Request) {
       }
     }
 
+    // 4. Fetch user profile preferences if available
+    let profileData = null;
+    try {
+      const { data: prof } = await supabase
+        .from("user_profiles")
+        .select("*")
+        .eq("email", cleanEmail)
+        .maybeSingle();
+      profileData = prof;
+    } catch (profErr) {
+      console.warn("user_profiles lookup notice:", profErr);
+    }
+
     return NextResponse.json({
       success: true,
       user: {
         email: cleanEmail,
-        fullName: userRecord?.full_name || "",
-        role: userRecord?.role || "Policy Researcher / Legal",
+        fullName: profileData?.full_name || userRecord?.full_name || cleanEmail.split("@")[0].title,
+        role: profileData?.role || userRecord?.role || "Policy Researcher / Legal",
+        primaryDomain: profileData?.primary_domain || "Banking, Finance & Tax",
+        subscribedAuthorities: profileData?.subscribed_authorities || [
+          "Reserve Bank of India (RBI)",
+          "Central Board of Direct Taxes (CBDT)",
+          "Ministry of Finance",
+        ],
+        onboardingCompleted: profileData ? Boolean(profileData.onboarding_completed) : false,
         isVerified: true,
       },
     });

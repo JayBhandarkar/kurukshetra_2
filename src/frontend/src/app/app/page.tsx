@@ -3,8 +3,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getClientSession, clearClientSession, UserSession } from "@/lib/authSession";
+import { getClientSession, setClientSession, clearClientSession, UserSession } from "@/lib/authSession";
 import { PillarLogoIcon } from "@/components/EmblemIcon";
+import { OnboardingChecklistModal, OnboardingPreferences } from "@/components/OnboardingChecklistModal";
 import {
   MessageSquare,
   FileText,
@@ -376,6 +377,10 @@ export default function AuthenticatedApp() {
     }
   };
 
+  // Onboarding & Domain Calibration Modal State
+  const [showOnboardingModal, setShowOnboardingModal] = useState(false);
+  const [showDomainSwitcher, setShowDomainSwitcher] = useState(false);
+
   // Check auth session & hydrate account-scoped chat history
   useEffect(() => {
     const session = getClientSession();
@@ -384,6 +389,32 @@ export default function AuthenticatedApp() {
     } else {
       setUser(session);
       setLoadingAuth(false);
+
+      // Check if user needs domain calibration onboarding
+      if (session.onboardingCompleted === false || session.onboardingCompleted === undefined) {
+        fetch(`/api/user/profile?email=${encodeURIComponent(session.email)}`)
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.profile) {
+              if (!data.profile.onboarding_completed) {
+                setShowOnboardingModal(true);
+              } else {
+                const updatedSession = {
+                  ...session,
+                  primaryDomain: data.profile.primary_domain,
+                  role: data.profile.role,
+                  subscribedAuthorities: data.profile.subscribed_authorities,
+                  onboardingCompleted: true,
+                };
+                setUser(updatedSession);
+                setClientSession(updatedSession);
+              }
+            } else {
+              setShowOnboardingModal(true);
+            }
+          })
+          .catch(() => setShowOnboardingModal(true));
+      }
 
       // 1. Fetch conversations from Keyset API
       fetch(`/api/conversations?userId=${encodeURIComponent(session.email)}&limit=25`)
@@ -663,6 +694,11 @@ export default function AuthenticatedApp() {
           attachedDocument: attachedDoc
             ? { name: attachedDoc.name, content: attachedDoc.content }
             : null,
+          userProfile: {
+            primary_domain: user?.primaryDomain || "Banking, Finance & Tax",
+            subscribed_authorities: user?.subscribedAuthorities || [],
+            role: user?.role || "Legal Counsel / Advocate",
+          },
         }),
       });
 
@@ -1111,6 +1147,83 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             </h1>
           </div>
 
+          {/* Right: Priority Domain Focus Badge & Switcher */}
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <button
+                onClick={() => setShowDomainSwitcher((v) => !v)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#EFE9E0] hover:bg-[#E5DDD0] text-[11px] font-medium text-[#5D2A18] border border-[#DCD5C9] transition-all cursor-pointer shadow-2xs"
+                title="Click to change active domain search funnel"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <span className="font-semibold text-stone-500 text-[10px]">Priority Focus:</span>
+                <span className="font-bold text-[#1E1A17] truncate max-w-[120px] sm:max-w-[210px]">
+                  {user?.primaryDomain || "Banking, Finance & Tax"}
+                </span>
+                <ChevronDown className="w-3 h-3 text-stone-500 shrink-0" />
+              </button>
+
+              {showDomainSwitcher && (
+                <div className="absolute right-0 top-full mt-2 w-72 bg-[#FAF8F5] border border-[#E8E2D8] rounded-xl shadow-xl p-2 z-40 space-y-1">
+                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-stone-400">
+                    Switch Priority Sector
+                  </div>
+                  {[
+                    "Banking, Finance & Tax",
+                    "Corporate Law & Insolvency",
+                    "Tech, AI & Data Protection",
+                    "Education & Research",
+                    "Environment, Energy & Infra",
+                    "General Sovereign Administration",
+                  ].map((domainName) => {
+                    const isCurrent = (user?.primaryDomain || "Banking, Finance & Tax") === domainName;
+                    return (
+                      <button
+                        key={domainName}
+                        onClick={() => {
+                          const updated = { ...user!, primaryDomain: domainName };
+                          setUser(updated);
+                          setClientSession(updated);
+                          setShowDomainSwitcher(false);
+                          fetch("/api/user/profile", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              email: user?.email,
+                              primary_domain: domainName,
+                              role: user?.role,
+                              subscribed_authorities: user?.subscribedAuthorities,
+                              onboarding_completed: true,
+                            }),
+                          }).catch(() => {});
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between ${
+                          isCurrent
+                            ? "bg-[#EAE3D9] text-[#5D2A18] font-semibold"
+                            : "text-stone-700 hover:bg-[#F3EDE4]"
+                        }`}
+                      >
+                        <span className="truncate">{domainName}</span>
+                        {isCurrent && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                      </button>
+                    );
+                  })}
+
+                  <div className="pt-1.5 border-t border-[#E8E2D8]">
+                    <button
+                      onClick={() => {
+                        setShowDomainSwitcher(false);
+                        setShowOnboardingModal(true);
+                      }}
+                      className="w-full text-center py-1 text-[11px] font-semibold text-[#5D2A18] hover:underline cursor-pointer"
+                    >
+                      Calibrate Custom Authorities...
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </header>
 
         {/* VIEW 1: AI CHAT CONVERSATION */}
@@ -1682,6 +1795,29 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             </a>
           </div>
         </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 4. ONBOARDING & DOMAIN CALIBRATION MODAL */}
+      {/* ========================================================================= */}
+      {showOnboardingModal && user && (
+        <OnboardingChecklistModal
+          userEmail={user.email}
+          userFullName={user.fullName}
+          initialRole={user.role}
+          onComplete={(prefs: OnboardingPreferences) => {
+            const updated = {
+              ...user,
+              primaryDomain: prefs.primaryDomain,
+              role: prefs.role,
+              subscribedAuthorities: prefs.subscribedAuthorities,
+              onboardingCompleted: true,
+            };
+            setUser(updated);
+            setClientSession(updated);
+            setShowOnboardingModal(false);
+          }}
+        />
       )}
     </div>
   );
