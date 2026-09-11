@@ -258,26 +258,146 @@ export default function AuthenticatedApp() {
   const [processingStep, setProcessingStep] = useState<number>(0);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
-  // Local Document Attachment State
-  const [attachedDoc, setAttachedDoc] = useState<{ name: string; size: string; content: string } | null>(null);
+  // Session Attached Documents State (Multi-file, Deduped, Max 5 per session)
+  interface SessionDoc {
+    id: string;
+    name: string;
+    size: string;
+    status: "uploading" | "ready" | "error";
+    hash?: string;
+    documentId?: string | number;
+  }
+
+  const [sessionDocs, setSessionDocs] = useState<SessionDoc[]>([]);
+  const [isUploadingQueue, setIsUploadingQueue] = useState(false);
+  const [uploadNotification, setUploadNotification] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+    e.target.value = ""; // Reset file input
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = (event.target?.result as string) || "";
+    if (isUploadingQueue) {
+      setUploadNotification("A document upload is currently in progress. Please wait.");
+      setTimeout(() => setUploadNotification(null), 4000);
+      return;
+    }
+
+    // 1. Session Max Files Limit Check (Max 5)
+    const currentCount = sessionDocs.length;
+    if (currentCount >= 5) {
+      setUploadNotification("Maximum 5 files allowed per chat session.");
+      setTimeout(() => setUploadNotification(null), 4000);
+      return;
+    }
+
+    // 2. Deduplication check against existing sessionDocs
+    const validFilesToUpload: File[] = [];
+    const duplicatesFound: string[] = [];
+
+    for (const file of files) {
+      const isDuplicate = sessionDocs.some(
+        (doc) => doc.name.toLowerCase() === file.name.toLowerCase()
+      );
+      if (isDuplicate) {
+        duplicatesFound.push(file.name);
+      } else if (currentCount + validFilesToUpload.length < 5) {
+        validFilesToUpload.push(file);
+      }
+    }
+
+    if (duplicatesFound.length > 0) {
+      setUploadNotification(
+        `"${duplicatesFound.join(", ")}" is already attached in this chat session.`
+      );
+      setTimeout(() => setUploadNotification(null), 5000);
+    }
+
+    if (files.length > validFilesToUpload.length + duplicatesFound.length) {
+      setUploadNotification("Session limit reached: Only up to 5 files can be attached.");
+      setTimeout(() => setUploadNotification(null), 5000);
+    }
+
+    if (validFilesToUpload.length === 0) return;
+
+    // 3. Process Upload Queue Sequentially (1-by-1) with In-Flight Lock
+    setIsUploadingQueue(true);
+
+    for (const file of validFilesToUpload) {
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const sizeKB = (file.size / 1024).toFixed(1) + " KB";
-      setAttachedDoc({
-        name: file.name,
-        size: sizeKB,
-        content: content.slice(0, 45000),
+
+      // Append placeholder with uploading spinner
+      setSessionDocs((prev) => [
+        ...prev,
+        { id: tempId, name: file.name, size: sizeKB, status: "uploading" },
+      ]);
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("user_id", user?.email || "anonymous");
+        formData.append("session_id", currentSessionId || "");
+
+        const res = await fetch("/api/documents/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Document indexing failed");
+        }
+
+        // Mark READY ONLY after vector embeddings are committed in PostgreSQL
+        setSessionDocs((prev) =>
+          prev.map((doc) =>
+            doc.id === tempId
+              ? {
+                  ...doc,
+                  id: String(data.document_id || tempId),
+                  documentId: data.document_id,
+                  status: "ready",
+                  hash: data.sha256_hash,
+                }
+              : doc
+          )
+        );
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : "Upload failed";
+        setUploadNotification(`Error indexing "${file.name}": ${errMsg}`);
+        setTimeout(() => setUploadNotification(null), 6000);
+
+        // Remove failed placeholder
+        setSessionDocs((prev) => prev.filter((doc) => doc.id !== tempId));
+      }
+    }
+
+    setIsUploadingQueue(false);
+  };
+
+  const handleDeleteDocument = async (doc: SessionDoc) => {
+    // 1. Remove from local session state immediately
+    setSessionDocs((prev) => prev.filter((d) => d.id !== doc.id));
+
+    // 2. Hard delete from Supabase PostgreSQL & Storage if saved
+    const targetId = doc.documentId || doc.id;
+    if (!targetId || String(targetId).startsWith("temp-")) return;
+
+    try {
+      const res = await fetch(`/api/documents/${targetId}?userId=${encodeURIComponent(user?.email || "anonymous")}`, {
+        method: "DELETE",
       });
-    };
-    reader.readAsText(file);
-    e.target.value = "";
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setUploadNotification(`"${doc.name}" permanently deleted from database.`);
+        setTimeout(() => setUploadNotification(null), 4000);
+      }
+    } catch (err) {
+      console.warn("Error deleting document:", err);
+    }
   };
 
   // Compare Workspace State
@@ -559,7 +679,7 @@ export default function AuthenticatedApp() {
     setHasMoreMessages(false);
     setMessagesCursor(null);
     setInputQuery("");
-    setAttachedDoc(null);
+    setSessionDocs([]);
   };
 
   const deleteSession = async (sessionId: string, e: React.MouseEvent) => {
@@ -717,8 +837,11 @@ export default function AuthenticatedApp() {
           query: text.trim(),
           conversationId: currentSession.id,
           userId: user?.email || "anonymous-user",
-          attachedDocument: attachedDoc
-            ? { name: attachedDoc.name, content: attachedDoc.content }
+          attachedDocuments: sessionDocs
+            .filter((d) => d.status === "ready")
+            .map((d) => ({ id: d.id, name: d.name, documentId: d.documentId })),
+          attachedDocument: sessionDocs.find((d) => d.status === "ready")
+            ? { name: sessionDocs.find((d) => d.status === "ready")!.name }
             : null,
           userProfile: {
             primary_domain: user?.primaryDomain || "Banking, Finance & Tax",
@@ -1031,33 +1154,51 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             <span>New Analysis</span>
           </button>
 
-          {/* Hidden File Input for Local Document Selection */}
+          {/* Hidden File Input for Document Selection via (+) button */}
           <input
             type="file"
             ref={fileInputRef}
-            onChange={handleFileUpload}
-            accept=".pdf,.doc,.docx,.txt,.csv,.json,.md"
+            onChange={handleFilesSelected}
+            multiple
+            accept=".pdf,.doc,.docx,.txt,.csv,.json,.md,.png,.jpg"
             className="hidden"
           />
 
-          {/* Attached Document Indicator in Sidebar (if active) */}
-          {attachedDoc && (
-            <div className="flex items-center justify-between p-2 bg-white border border-[#E8E2D8] rounded-xl text-xs shadow-2xs">
-              <div className="flex items-center gap-1.5 overflow-hidden">
-                <FileText className="w-3.5 h-3.5 text-[#5D2A18] flex-shrink-0" />
-                <div className="overflow-hidden">
-                  <span className="block truncate font-medium text-stone-800 text-[11px]">{attachedDoc.name}</span>
-                  <span className="block text-[10px] text-stone-400">{attachedDoc.size}</span>
-                </div>
+          {/* Attached Document Indicators in Sidebar (if active) */}
+          {sessionDocs.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider text-stone-400 px-1">
+                <span>Session Files ({sessionDocs.length}/5)</span>
               </div>
-              <button
-                type="button"
-                onClick={() => setAttachedDoc(null)}
-                className="p-1 text-stone-400 hover:text-red-600 rounded cursor-pointer"
-                title="Remove attached document"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+              {sessionDocs.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="flex items-center justify-between p-2 bg-white border border-[#E8E2D8] rounded-xl text-xs shadow-2xs"
+                >
+                  <div className="flex items-center gap-1.5 overflow-hidden">
+                    {doc.status === "uploading" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-amber-600 animate-spin flex-shrink-0" />
+                    ) : (
+                      <FileText className="w-3.5 h-3.5 text-[#5D2A18] flex-shrink-0" />
+                    )}
+                    <div className="overflow-hidden">
+                      <span className="block truncate font-medium text-stone-800 text-[11px]">{doc.name}</span>
+                      <span className="block text-[10px] text-stone-400">
+                        {doc.status === "uploading" ? "Indexing..." : doc.size}
+                      </span>
+                    </div>
+                  </div>
+                  {doc.status !== "uploading" && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteDocument(doc)}
+                      className="p-1 text-stone-400 hover:text-red-600 rounded cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -1376,21 +1517,56 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             {/* Bottom Floating Chat Composer */}
             <div className="flex-shrink-0 px-4 pb-4 pt-1 bg-[#FAF8F5]">
               <div className="max-w-3xl mx-auto space-y-2">
-                {attachedDoc && (
-                  <div className="flex items-center justify-between px-3 py-1.5 bg-[#FAF4EC] border border-[#EADBCC] rounded-xl text-xs text-[#5D2A18] shadow-2xs animate-in fade-in duration-150">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <FileText className="w-3.5 h-3.5 text-[#5D2A18] flex-shrink-0" />
-                      <span className="font-semibold truncate max-w-[200px] sm:max-w-xs">{attachedDoc.name}</span>
-                      <span className="text-stone-400 text-[10.5px]">({attachedDoc.size}) · Attached as active context</span>
-                    </div>
+                {/* Upload Notification Toast Banner */}
+                {uploadNotification && (
+                  <div className="flex items-center justify-between px-3.5 py-2 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-xl shadow-2xs animate-in fade-in">
+                    <span className="font-medium">{uploadNotification}</span>
                     <button
                       type="button"
-                      onClick={() => setAttachedDoc(null)}
-                      className="p-1 text-stone-400 hover:text-red-700 rounded transition-colors cursor-pointer"
-                      title="Remove attached document"
+                      onClick={() => setUploadNotification(null)}
+                      className="p-1 text-amber-700 hover:text-amber-900 cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
+                  </div>
+                )}
+
+                {/* Attached Document Pill Bar (Clean File Names, No Technical Chunks Text) */}
+                {sessionDocs.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-[#FAF4EC]/90 border border-[#EADBCC] rounded-xl text-xs text-[#5D2A18] shadow-2xs animate-in fade-in duration-150">
+                    {sessionDocs.map((doc) => (
+                      <div
+                        key={doc.id}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all ${
+                          doc.status === "uploading"
+                            ? "bg-amber-50 border-amber-300 text-amber-900"
+                            : "bg-white border-[#E8E2D8] text-stone-800 shadow-2xs"
+                        }`}
+                      >
+                        {doc.status === "uploading" ? (
+                          <Loader2 className="w-3.5 h-3.5 text-amber-600 animate-spin flex-shrink-0" />
+                        ) : (
+                          <FileText className="w-3.5 h-3.5 text-[#5D2A18] flex-shrink-0" />
+                        )}
+                        <span className="truncate max-w-[150px] sm:max-w-[200px]" title={doc.name}>
+                          {doc.name}
+                        </span>
+                        {doc.status === "uploading" ? (
+                          <span className="text-[10px] text-amber-600 font-normal">Indexing...</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteDocument(doc)}
+                            className="p-0.5 text-stone-400 hover:text-red-700 rounded transition-colors cursor-pointer ml-0.5"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <span className="text-[10.5px] text-stone-400 ml-auto px-1">
+                      {sessionDocs.length}/5 files
+                    </span>
                   </div>
                 )}
 
@@ -1404,23 +1580,31 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="p-2 text-stone-400 hover:text-[#5D2A18] hover:bg-[#FAF8F5] rounded-xl transition-colors cursor-pointer"
-                    title="Attach local document from PC"
+                    disabled={isUploadingQueue || sessionDocs.length >= 5}
+                    className="p-2 text-stone-400 hover:text-[#5D2A18] hover:bg-[#FAF8F5] rounded-xl transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <Plus className="w-4 h-4" />
+                    {isUploadingQueue ? (
+                      <Loader2 className="w-4 h-4 text-[#5D2A18] animate-spin" />
+                    ) : (
+                      <Plus className="w-4 h-4" />
+                    )}
                   </button>
 
                   <input
                     type="text"
                     value={inputQuery}
                     onChange={(e) => setInputQuery(e.target.value)}
-                    placeholder={attachedDoc ? `Ask about "${attachedDoc.name}" or indexed documents...` : "Ask a question about your government documents..."}
+                    placeholder={
+                      sessionDocs.length > 0
+                        ? `Ask about ${sessionDocs.length} attached document${sessionDocs.length > 1 ? "s" : ""} or indexed laws...`
+                        : "Ask a question about your government documents..."
+                    }
                     className="flex-1 bg-transparent text-sm text-stone-900 placeholder-stone-400 focus:outline-none px-1"
                   />
 
                   <button
                     type="submit"
-                    disabled={!inputQuery.trim() || isProcessing}
+                    disabled={!inputQuery.trim() || isProcessing || isUploadingQueue}
                     className="w-8 h-8 rounded-xl bg-[#5D2A18] hover:bg-[#431D10] text-white flex items-center justify-center transition-all disabled:opacity-40 disabled:hover:bg-[#5D2A18] cursor-pointer shadow-xs"
                   >
                     <ArrowUp className="w-4 h-4" />
