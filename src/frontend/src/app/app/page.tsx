@@ -88,88 +88,6 @@ export interface DocumentItem {
   clausesCount: number;
 }
 
-// Pre-seeded Evidence Citations
-const CITATION_STORE: Record<string, Citation> = {
-  "cite-edu-2025": {
-    id: "cite-edu-2025",
-    docTitle: "Notification No. 24/2025 (NEP Framework)",
-    ministry: "Ministry of Education",
-    gazetteNumber: "F.No. 12-4/2025-U.Policy",
-    date: "12 Jan 2025",
-    page: 7,
-    section: "Section 4.2",
-    clause: "Clause 4.2(a) - Application Deadlines",
-    quote: "Applicants must submit applications within 45 days from the date of publication in the Official Gazette, extending the prior 30-day mandate under Sub-clause (1).",
-    confidence: 0.98,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  "cite-edu-exp": {
-    id: "cite-edu-exp",
-    docTitle: "Notification No. 24/2025 (NEP Framework)",
-    ministry: "Ministry of Education",
-    gazetteNumber: "F.No. 12-4/2025-U.Policy",
-    date: "12 Jan 2025",
-    page: 8,
-    section: "Section 5.1",
-    clause: "Section 5.1 - Experience Requirements",
-    quote: "The minimum required institutional experience for program coordinator accreditation is enhanced from two (2) years to three (3) years of continuous academic tenure.",
-    confidence: 0.96,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  "cite-edu-exemption": {
-    id: "cite-edu-exemption",
-    docTitle: "Notification No. 24/2025 (NEP Framework)",
-    ministry: "Ministry of Education",
-    gazetteNumber: "F.No. 12-4/2025-U.Policy",
-    date: "12 Jan 2025",
-    page: 9,
-    section: "Section 5.3",
-    clause: "Section 5.3 - Transitional Exemptions",
-    quote: "The provisional exemption previously granted to Category X standalone technical institutes is repealed effective the academic cycle 2025-26.",
-    confidence: 0.94,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  "cite-fin-tds": {
-    id: "cite-fin-tds",
-    docTitle: "Circular No. 04/2025 (Direct Tax Provisions)",
-    ministry: "Ministry of Finance",
-    gazetteNumber: "CBDT/2025/CIR-04",
-    date: "03 Mar 2025",
-    page: 4,
-    section: "Section 195(2)",
-    clause: "Rule 37BB - Digital Verification",
-    quote: "All physical documentation mandates under Form 15CA/CB are substituted with DigiLocker cryptographically signed tokens verified via the National Single Sign-On API.",
-    confidence: 0.98,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  "cite-pmay-subsidy": {
-    id: "cite-pmay-subsidy",
-    docTitle: "PMAY-G Phase III Allocation Guidelines",
-    ministry: "Ministry of Rural Development",
-    gazetteNumber: "MORD/PMAYG/III/2024",
-    date: "18 Nov 2024",
-    page: 12,
-    section: "Section 6.2",
-    clause: "Clause 6.2(a) - Unit Cost Norms",
-    quote: "The unit assistance is revised to ₹1.20 lakh in plain areas and ₹1.30 lakh in hilly states, subject to mandatory 3-tier geotagged asset verification prior to tranche release.",
-    confidence: 0.97,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  "cite-health-fhir": {
-    id: "cite-health-fhir",
-    docTitle: "Ayushman Digital Mission Interoperability Standards",
-    ministry: "Ministry of Health",
-    gazetteNumber: "ABDM/GO-88/2025",
-    date: "21 Feb 2025",
-    page: 6,
-    section: "Section 3.4",
-    clause: "FHIR Protocol Interoperability",
-    quote: "Tier-1 and Tier-2 healthcare facilities must complete HL7 FHIR Release 4 standard integration for electronic health record data sharing by June 30, 2025.",
-    confidence: 0.95,
-    pdfUrl: "https://egazette.gov.in",
-  },
-};
-
 // Initial Document Library
 const INITIAL_DOCUMENTS: DocumentItem[] = [
   {
@@ -258,26 +176,146 @@ export default function AuthenticatedApp() {
   const [processingStep, setProcessingStep] = useState<number>(0);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
-  // Local Document Attachment State
-  const [attachedDoc, setAttachedDoc] = useState<{ name: string; size: string; content: string } | null>(null);
+  // Session Attached Documents State (Multi-file, Deduped, Max 5 per session)
+  interface SessionDoc {
+    id: string;
+    name: string;
+    size: string;
+    status: "uploading" | "ready" | "error";
+    hash?: string;
+    documentId?: string | number;
+  }
+
+  const [sessionDocs, setSessionDocs] = useState<SessionDoc[]>([]);
+  const [isUploadingQueue, setIsUploadingQueue] = useState(false);
+  const [uploadNotification, setUploadNotification] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+    e.target.value = ""; // Reset file input
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = (event.target?.result as string) || "";
+    if (isUploadingQueue) {
+      setUploadNotification("A document upload is currently in progress. Please wait.");
+      setTimeout(() => setUploadNotification(null), 4000);
+      return;
+    }
+
+    // 1. Session Max Files Limit Check (Max 5)
+    const currentCount = sessionDocs.length;
+    if (currentCount >= 5) {
+      setUploadNotification("Maximum 5 files allowed per chat session.");
+      setTimeout(() => setUploadNotification(null), 4000);
+      return;
+    }
+
+    // 2. Deduplication check against existing sessionDocs
+    const validFilesToUpload: File[] = [];
+    const duplicatesFound: string[] = [];
+
+    for (const file of files) {
+      const isDuplicate = sessionDocs.some(
+        (doc) => doc.name.toLowerCase() === file.name.toLowerCase()
+      );
+      if (isDuplicate) {
+        duplicatesFound.push(file.name);
+      } else if (currentCount + validFilesToUpload.length < 5) {
+        validFilesToUpload.push(file);
+      }
+    }
+
+    if (duplicatesFound.length > 0) {
+      setUploadNotification(
+        `"${duplicatesFound.join(", ")}" is already attached in this chat session.`
+      );
+      setTimeout(() => setUploadNotification(null), 5000);
+    }
+
+    if (files.length > validFilesToUpload.length + duplicatesFound.length) {
+      setUploadNotification("Session limit reached: Only up to 5 files can be attached.");
+      setTimeout(() => setUploadNotification(null), 5000);
+    }
+
+    if (validFilesToUpload.length === 0) return;
+
+    // 3. Process Upload Queue Sequentially (1-by-1) with In-Flight Lock
+    setIsUploadingQueue(true);
+
+    for (const file of validFilesToUpload) {
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const sizeKB = (file.size / 1024).toFixed(1) + " KB";
-      setAttachedDoc({
-        name: file.name,
-        size: sizeKB,
-        content: content.slice(0, 45000),
+
+      // Append placeholder with uploading spinner
+      setSessionDocs((prev) => [
+        ...prev,
+        { id: tempId, name: file.name, size: sizeKB, status: "uploading" },
+      ]);
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("user_id", user?.email || "anonymous");
+        formData.append("session_id", currentSessionId || "");
+
+        const res = await fetch("/api/documents/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Document indexing failed");
+        }
+
+        // Mark READY ONLY after vector embeddings are committed in PostgreSQL
+        setSessionDocs((prev) =>
+          prev.map((doc) =>
+            doc.id === tempId
+              ? {
+                  ...doc,
+                  id: String(data.document_id || tempId),
+                  documentId: data.document_id,
+                  status: "ready",
+                  hash: data.sha256_hash,
+                }
+              : doc
+          )
+        );
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : "Upload failed";
+        setUploadNotification(`Error indexing "${file.name}": ${errMsg}`);
+        setTimeout(() => setUploadNotification(null), 6000);
+
+        // Remove failed placeholder
+        setSessionDocs((prev) => prev.filter((doc) => doc.id !== tempId));
+      }
+    }
+
+    setIsUploadingQueue(false);
+  };
+
+  const handleDeleteDocument = async (doc: SessionDoc) => {
+    // 1. Remove from local session state immediately
+    setSessionDocs((prev) => prev.filter((d) => d.id !== doc.id));
+
+    // 2. Hard delete from Supabase PostgreSQL & Storage if saved
+    const targetId = doc.documentId || doc.id;
+    if (!targetId || String(targetId).startsWith("temp-")) return;
+
+    try {
+      const res = await fetch(`/api/documents/${targetId}?userId=${encodeURIComponent(user?.email || "anonymous")}`, {
+        method: "DELETE",
       });
-    };
-    reader.readAsText(file);
-    e.target.value = "";
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setUploadNotification(`"${doc.name}" permanently deleted from database.`);
+        setTimeout(() => setUploadNotification(null), 4000);
+      }
+    } catch (err) {
+      console.warn("Error deleting document:", err);
+    }
   };
 
   // Compare Workspace State
@@ -364,16 +402,20 @@ export default function AuthenticatedApp() {
             })) : [],
           }));
 
-          setSessions((prev) =>
-            prev.map((s) => (s.id === convId ? { ...s, messages: mappedMessages } : s))
-          );
+          // Only update if we actually got messages back — never overwrite with empty
+          if (mappedMessages.length > 0) {
+            setSessions((prev) =>
+              prev.map((s) => (s.id === convId ? { ...s, messages: mappedMessages } : s))
+            );
+          }
           setMessagesCursor(result.nextCursor);
           setHasMoreMessages(result.hasMore);
           return;
         }
       }
     } catch (e) {
-      console.warn("Could not fetch remote messages, using local store:", e);
+      // Silently keep whatever messages are already in state — do not wipe them
+      console.warn("Could not fetch remote messages, keeping local state:", e);
     }
   };
 
@@ -482,8 +524,10 @@ export default function AuthenticatedApp() {
             }
           }
 
-          // Start clean initial conversation
-          const freshId = `session-${Date.now()}`;
+          // Start clean initial conversation — use a real UUID so if the user
+          // sends a message before DB load completes, the same ID is reused on
+          // the next refresh instead of creating a duplicate session.
+          const freshId = crypto.randomUUID();
           const freshSession: ChatSession = {
             id: freshId,
             title: "New Conversation",
@@ -496,7 +540,7 @@ export default function AuthenticatedApp() {
         })
         .catch((err) => {
           console.warn("Conversations API fallback:", err);
-          const freshId = `session-${Date.now()}`;
+          const freshId = crypto.randomUUID();
           const freshSession: ChatSession = {
             id: freshId,
             title: "New Conversation",
@@ -533,13 +577,20 @@ export default function AuthenticatedApp() {
     setCurrentSessionId(sessionId);
     setActiveView("chat");
     setActiveCitation(null);
-    if (user?.email) {
+
+    // Only fetch from DB if we don't already have messages cached in state.
+    // This prevents messages from disappearing when switching back to a
+    // conversation that was already loaded.
+    const existing = sessions.find((s) => s.id === sessionId);
+    if (user?.email && (!existing?.messages || existing.messages.length === 0)) {
       loadConversationMessages(sessionId, user.email);
     }
   };
 
   const startNewChat = async () => {
-    const newId = `session-${Date.now()}`;
+    // Use a real UUID so that if the user sends a message immediately (before any
+    // DB write), the same ID is stable on the next refresh — no duplicate sessions.
+    const newId = crypto.randomUUID();
     const newSession: ChatSession = {
       id: newId,
       title: "New Conversation",
@@ -547,10 +598,10 @@ export default function AuthenticatedApp() {
       docCount: 0,
       messages: [],
     };
-    // Keep all DB-persisted sessions (non "session-" id) + local sessions that have messages
-    // Drop any existing unsaved empty drafts to avoid accumulation
+    // Keep all sessions that have messages. Drop empty unsaved drafts to avoid
+    // accumulating blank entries in the sidebar on repeated "New Analysis" clicks.
     const existingActive = sessions.filter(
-      (s) => !s.id.startsWith("session-") || (s.messages && s.messages.length > 0)
+      (s) => s.messages && s.messages.length > 0
     );
     setSessions([newSession, ...existingActive]);
     setCurrentSessionId(newId);
@@ -559,14 +610,14 @@ export default function AuthenticatedApp() {
     setHasMoreMessages(false);
     setMessagesCursor(null);
     setInputQuery("");
-    setAttachedDoc(null);
+    setSessionDocs([]);
   };
 
   const deleteSession = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const filtered = sessions.filter((s) => s.id !== sessionId);
     if (filtered.length === 0) {
-      const freshId = `session-${Date.now()}`;
+      const freshId = crypto.randomUUID();
       const freshSession: ChatSession = {
         id: freshId,
         title: "New Conversation",
@@ -682,6 +733,11 @@ export default function AuthenticatedApp() {
     const userMsgId = `user-${Date.now()}`;
     const assistantMsgId = `asst-${Date.now()}`;
 
+    // Snapshot the active session ID at the moment the message is sent.
+    // All subsequent state updates reference this captured ID — never the
+    // potentially-stale `currentSessionId` from the closure.
+    const activeSessionId = currentSessionId;
+
     const userMessage: ChatMessage = {
       id: userMsgId,
       role: "user",
@@ -689,15 +745,18 @@ export default function AuthenticatedApp() {
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
 
-    // Update active session with user message
-    const updatedMessages = [...(currentSession.messages || []), userMessage];
-    const updatedSession = {
-      ...currentSession,
-      title: currentSession.messages.length === 0 ? text.slice(0, 42) : currentSession.title,
-      messages: updatedMessages,
-    };
-
-    setSessions(sessions.map((s) => (s.id === currentSessionId ? updatedSession : s)));
+    // Append user message using functional updater so we always operate on
+    // the latest state, never a stale closure snapshot.
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== activeSessionId) return s;
+        return {
+          ...s,
+          title: s.messages.length === 0 ? text.slice(0, 42) : s.title,
+          messages: [...(s.messages || []), userMessage],
+        };
+      })
+    );
 
     // Begin Live AI Agent Processing Sequence
     setIsProcessing(true);
@@ -715,10 +774,13 @@ export default function AuthenticatedApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: text.trim(),
-          conversationId: currentSession.id,
+          conversationId: activeSessionId,
           userId: user?.email || "anonymous-user",
-          attachedDocument: attachedDoc
-            ? { name: attachedDoc.name, content: attachedDoc.content }
+          attachedDocuments: sessionDocs
+            .filter((d) => d.status === "ready")
+            .map((d) => ({ id: d.id, name: d.name, documentId: d.documentId })),
+          attachedDocument: sessionDocs.find((d) => d.status === "ready")
+            ? { name: sessionDocs.find((d) => d.status === "ready")!.name }
             : null,
           userProfile: {
             primary_domain: user?.primaryDomain || "Banking, Finance & Tax",
@@ -755,61 +817,47 @@ export default function AuthenticatedApp() {
         ],
       };
 
-      const finalSession = {
-        ...updatedSession,
-        // If the API assigned a real DB UUID (replacing our local "session-" draft id), use it
-        id: data.conversationId || updatedSession.id,
-        docCount: data.citations?.length || 1,
-        messages: [...updatedMessages, assistantMessage],
-      };
+      // The API may return a real DB UUID to replace our local "session-" draft id.
+      const returnedId: string = data.conversationId || activeSessionId;
 
-      // If the session ID changed (local draft → real DB UUID), update currentSessionId too
-      const prevId = currentSessionId;
-      const newId = finalSession.id;
       setSessions((prev) =>
-        prev.map((s) => (s.id === prevId ? finalSession : s))
+        prev.map((s) => {
+          if (s.id !== activeSessionId) return s;
+          return {
+            ...s,
+            id: returnedId,
+            docCount: data.citations?.length || 1,
+            // Append to whatever messages are already in state (never overwrite from closure)
+            messages: [...(s.messages || []), assistantMessage],
+          };
+        })
       );
-      if (newId !== prevId) {
-        setCurrentSessionId(newId);
+
+      // If the DB assigned a new UUID, update the active session pointer
+      if (returnedId !== activeSessionId) {
+        setCurrentSessionId(returnedId);
       }
     } catch (err) {
-      console.warn("Live RAG API fallback:", err);
-      // High-precision fallback
-      const fallbackCitation = CITATION_STORE["cite-edu-2025"];
-      const assistantMessage: ChatMessage & { followUps?: string[] } = {
+      console.error("RAG query error:", err);
+      const assistantMessage: ChatMessage = {
         id: assistantMsgId,
         role: "assistant",
-        content: `### Response from Indexed Sovereign Documents
-
-Under the official regulatory provisions indexed in Pramaan:
-
-1. **Procedural Timelines**: Application and reporting windows follow a standard 45-day cycle from official gazette publication.
-[[cite-edu-2025]]
-
-2. **Digital Verification**: Form submissions across central departments accept cryptographically signed tokens via DigiLocker API.
-[[cite-fin-tds]]
-
-All clauses have been verified against the Central Government Knowledge Base.`,
+        content: "Unable to retrieve an answer at this time. Please check that the AI service is running and your documents are indexed, then try again.",
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        processingStages: [
-          "Query Understanding",
-          "Orchestrator Agent",
-          "Hybrid Retrieval (pgvector + Knowledge Graph)",
-          "Reasoning & Comparison",
-          "Evidence Validation",
-          "Response Generation",
-        ],
-        citations: [fallbackCitation, CITATION_STORE["cite-fin-tds"]],
-        followUps: ["Compare with earlier 2024 circulars", "Show exact gazette citation text"],
+        processingStages: [],
+        citations: [],
       };
 
-      const finalSession = {
-        ...updatedSession,
-        docCount: 2,
-        messages: [...updatedMessages, assistantMessage],
-      };
-
-      setSessions(sessions.map((s) => (s.id === currentSessionId ? finalSession : s)));
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== activeSessionId) return s;
+          return {
+            ...s,
+            docCount: 0,
+            messages: [...(s.messages || []), assistantMessage],
+          };
+        })
+      );
     } finally {
       clearTimeout(stepTimer1);
       clearTimeout(stepTimer2);
@@ -835,7 +883,7 @@ All clauses have been verified against the Central Government Knowledge Base.`,
       const match = part.match(/\[\[(cite-[a-zA-Z0-9-]+)\]\]/);
       if (match) {
         const citeId = match[1];
-        const citation = CITATION_STORE[citeId] || citations?.find((c) => c.id === citeId);
+        const citation = citations?.find((c) => c.id === citeId);
         if (!citation) return null;
 
         const isSelected = activeCitation?.id === citation.id;
@@ -845,16 +893,13 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             key={idx}
             type="button"
             onClick={() => setActiveCitation(citation)}
-            className={`inline-flex items-center gap-1.5 px-2 py-0.5 mx-1 my-0.5 rounded-md text-[11px] font-semibold font-mono transition-all cursor-pointer border ${
-              isSelected
-                ? "bg-[#5D2A18] text-white border-[#5D2A18] shadow-xs"
-                : "bg-[#F3EFEA] hover:bg-[#EAE3D9] text-[#5D2A18] border-[#E5DFD7] hover:border-[#D5CBC0]"
-            }`}
-            title="Click to view verified source evidence"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded text-[10px] font-medium text-[#8C4A32] bg-[#F9F3ED] hover:bg-[#F0E6D8] border border-[#E8DDD3] transition-colors cursor-pointer whitespace-nowrap"
+            title={`${citation.docTitle} · p.${citation.page}`}
           >
-            <BookOpen className="w-3 h-3" />
+            <span className="opacity-50 text-[9px]">↗</span>
             <span>
-              [{citation.docTitle ? citation.docTitle.split("(")[0].trim() : "Verified Doc"} {citation.page ? `· p.${citation.page}` : ""} {citation.section ? `· ${citation.section}` : ""}]
+              {(citation.docTitle || "Source").trim().slice(0, 24)}
+              {citation.page ? ` · p.${citation.page}` : ""}
             </span>
           </button>
         );
@@ -882,15 +927,26 @@ All clauses have been verified against the Central Government Knowledge Base.`,
   const renderFormattedLine = (line: string, citations?: Citation[]) => {
     const trimmed = line.trim();
 
+    // 0. Horizontal rule (---) — section divider between sub-query answers
+    if (trimmed === "---") {
+      return <hr className="border-t border-[#E8E2D8] my-3" />;
+    }
+
     // 1. Markdown Headers (#, ##, ###, ####)
     const headerMatch = trimmed.match(/^(#{1,4})\s+(.+)$/);
     if (headerMatch) {
       const level = headerMatch[1].length;
       const title = headerMatch[2];
       if (level <= 2) {
-        return <h3 className="font-bold text-base text-stone-900 mt-3 mb-1">{renderInlineContent(title, citations)}</h3>;
+        return <h3 className="font-bold text-base text-stone-900 mt-4 mb-1">{renderInlineContent(title, citations)}</h3>;
       }
       return <h4 className="font-semibold text-sm text-stone-900 mt-2 mb-0.5">{renderInlineContent(title, citations)}</h4>;
+    }
+
+    // 1b. Standalone **bold line** used as a section header (e.g. **1. Question text**)
+    const standaloneBold = trimmed.match(/^\*\*(.+)\*\*$/);
+    if (standaloneBold) {
+      return <h3 className="font-bold text-[15px] text-stone-900 mt-4 mb-1">{renderInlineContent(standaloneBold[1], citations)}</h3>;
     }
 
     // 2. Bullet Lists (- or * or •)
@@ -1031,33 +1087,51 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             <span>New Analysis</span>
           </button>
 
-          {/* Hidden File Input for Local Document Selection */}
+          {/* Hidden File Input for Document Selection via (+) button */}
           <input
             type="file"
             ref={fileInputRef}
-            onChange={handleFileUpload}
-            accept=".pdf,.doc,.docx,.txt,.csv,.json,.md"
+            onChange={handleFilesSelected}
+            multiple
+            accept=".pdf,.doc,.docx,.txt,.csv,.json,.md,.png,.jpg"
             className="hidden"
           />
 
-          {/* Attached Document Indicator in Sidebar (if active) */}
-          {attachedDoc && (
-            <div className="flex items-center justify-between p-2 bg-white border border-[#E8E2D8] rounded-xl text-xs shadow-2xs">
-              <div className="flex items-center gap-1.5 overflow-hidden">
-                <FileText className="w-3.5 h-3.5 text-[#5D2A18] flex-shrink-0" />
-                <div className="overflow-hidden">
-                  <span className="block truncate font-medium text-stone-800 text-[11px]">{attachedDoc.name}</span>
-                  <span className="block text-[10px] text-stone-400">{attachedDoc.size}</span>
-                </div>
+          {/* Attached Document Indicators in Sidebar (if active) */}
+          {sessionDocs.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider text-stone-400 px-1">
+                <span>Session Files ({sessionDocs.length}/5)</span>
               </div>
-              <button
-                type="button"
-                onClick={() => setAttachedDoc(null)}
-                className="p-1 text-stone-400 hover:text-red-600 rounded cursor-pointer"
-                title="Remove attached document"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+              {sessionDocs.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="flex items-center justify-between p-2 bg-white border border-[#E8E2D8] rounded-xl text-xs shadow-2xs"
+                >
+                  <div className="flex items-center gap-1.5 overflow-hidden">
+                    {doc.status === "uploading" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-amber-600 animate-spin flex-shrink-0" />
+                    ) : (
+                      <FileText className="w-3.5 h-3.5 text-[#5D2A18] flex-shrink-0" />
+                    )}
+                    <div className="overflow-hidden">
+                      <span className="block truncate font-medium text-stone-800 text-[11px]">{doc.name}</span>
+                      <span className="block text-[10px] text-stone-400">
+                        {doc.status === "uploading" ? "Indexing..." : doc.size}
+                      </span>
+                    </div>
+                  </div>
+                  {doc.status !== "uploading" && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteDocument(doc)}
+                      className="p-1 text-stone-400 hover:text-red-600 rounded cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -1082,11 +1156,7 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             return displaySessions.map((s) => (
               <div
                 key={s.id}
-                onClick={() => {
-                  setCurrentSessionId(s.id);
-                  setActiveView("chat");
-                  setActiveCitation(null);
-                }}
+                onClick={() => selectConversation(s.id)}
                 className={`group flex items-center justify-between px-2 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer ${
                   currentSessionId === s.id && activeView === "chat"
                     ? "bg-[#EAE3D9] text-[#1E1A17] font-medium"
@@ -1313,7 +1383,7 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                       {msg.role === "user" ? (
                         /* User Message */
                         <div className="flex justify-end">
-                          <div className="bg-[#EFE9E0] text-[#1E1A17] px-4 py-2.5 rounded-full text-sm max-w-[85%] sm:max-w-[75%] leading-relaxed font-medium">
+                          <div className="bg-[#EFE9E0] text-[#1E1A17] px-4 py-2.5 rounded-2xl text-sm max-w-[85%] sm:max-w-[75%] leading-relaxed font-medium">
                             {msg.content}
                           </div>
                         </div>
@@ -1324,6 +1394,47 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                             {/* Cited Assistant Content + Actions inside white box */}
                             <div className="bg-white border border-[#E8E2D8] p-5 rounded-2xl shadow-xs">
                               {renderMessageContent(msg.content, msg.citations)}
+
+                              {/* ── Sources / Citations Panel ── */}
+                              {msg.citations && msg.citations.length > 0 && (
+                                <div className="mt-3 pt-3 border-t border-[#F0EBE3]">
+                                  <div className="flex items-center gap-1.5 mb-2">
+                                    <BookOpen className="w-3 h-3 text-[#8C4A32]" />
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#8C4A32]">
+                                      Sources
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {msg.citations.map((cit, citIdx) => (
+                                      <button
+                                        key={cit.id || citIdx}
+                                        type="button"
+                                        onClick={() => setActiveCitation(cit)}
+                                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-left cursor-pointer transition-colors ${
+                                          activeCitation?.id === cit.id
+                                            ? "bg-[#F5EDE3] border-[#D4A97A]"
+                                            : "bg-[#FAF8F5] border-[#E8E2D8] hover:bg-[#F3EDE4] hover:border-[#C9956A]"
+                                        }`}
+                                      >
+                                        <span className="flex-shrink-0 w-3.5 h-3.5 rounded-full bg-[#5D2A18] text-white text-[8px] font-bold flex items-center justify-center">
+                                          {citIdx + 1}
+                                        </span>
+                                        <span className="text-[11px] font-medium text-stone-800 leading-none">
+                                          {(cit.docTitle || "Document").trim().slice(0, 30)}
+                                        </span>
+                                        {cit.page && (
+                                          <span className="text-[10px] font-mono text-stone-400 leading-none">
+                                            p.{cit.page}
+                                          </span>
+                                        )}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+
+
                               <div className="flex items-center gap-1 text-stone-400 mt-3 pt-3 border-t border-[#F0EBE3]">
                                 <button
                                   onClick={() => copyToClipboard(msg.content, msg.id)}
@@ -1376,21 +1487,56 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             {/* Bottom Floating Chat Composer */}
             <div className="flex-shrink-0 px-4 pb-4 pt-1 bg-[#FAF8F5]">
               <div className="max-w-3xl mx-auto space-y-2">
-                {attachedDoc && (
-                  <div className="flex items-center justify-between px-3 py-1.5 bg-[#FAF4EC] border border-[#EADBCC] rounded-xl text-xs text-[#5D2A18] shadow-2xs animate-in fade-in duration-150">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <FileText className="w-3.5 h-3.5 text-[#5D2A18] flex-shrink-0" />
-                      <span className="font-semibold truncate max-w-[200px] sm:max-w-xs">{attachedDoc.name}</span>
-                      <span className="text-stone-400 text-[10.5px]">({attachedDoc.size}) · Attached as active context</span>
-                    </div>
+                {/* Upload Notification Toast Banner */}
+                {uploadNotification && (
+                  <div className="flex items-center justify-between px-3.5 py-2 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-xl shadow-2xs animate-in fade-in">
+                    <span className="font-medium">{uploadNotification}</span>
                     <button
                       type="button"
-                      onClick={() => setAttachedDoc(null)}
-                      className="p-1 text-stone-400 hover:text-red-700 rounded transition-colors cursor-pointer"
-                      title="Remove attached document"
+                      onClick={() => setUploadNotification(null)}
+                      className="p-1 text-amber-700 hover:text-amber-900 cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
+                  </div>
+                )}
+
+                {/* Attached Document Pill Bar (Clean File Names, No Technical Chunks Text) */}
+                {sessionDocs.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-[#FAF4EC]/90 border border-[#EADBCC] rounded-xl text-xs text-[#5D2A18] shadow-2xs animate-in fade-in duration-150">
+                    {sessionDocs.map((doc) => (
+                      <div
+                        key={doc.id}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all ${
+                          doc.status === "uploading"
+                            ? "bg-amber-50 border-amber-300 text-amber-900"
+                            : "bg-white border-[#E8E2D8] text-stone-800 shadow-2xs"
+                        }`}
+                      >
+                        {doc.status === "uploading" ? (
+                          <Loader2 className="w-3.5 h-3.5 text-amber-600 animate-spin flex-shrink-0" />
+                        ) : (
+                          <FileText className="w-3.5 h-3.5 text-[#5D2A18] flex-shrink-0" />
+                        )}
+                        <span className="truncate max-w-[150px] sm:max-w-[200px]" title={doc.name}>
+                          {doc.name}
+                        </span>
+                        {doc.status === "uploading" ? (
+                          <span className="text-[10px] text-amber-600 font-normal">Indexing...</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteDocument(doc)}
+                            className="p-0.5 text-stone-400 hover:text-red-700 rounded transition-colors cursor-pointer ml-0.5"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <span className="text-[10.5px] text-stone-400 ml-auto px-1">
+                      {sessionDocs.length}/5 files
+                    </span>
                   </div>
                 )}
 
@@ -1404,23 +1550,31 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="p-2 text-stone-400 hover:text-[#5D2A18] hover:bg-[#FAF8F5] rounded-xl transition-colors cursor-pointer"
-                    title="Attach local document from PC"
+                    disabled={isUploadingQueue || sessionDocs.length >= 5}
+                    className="p-2 text-stone-400 hover:text-[#5D2A18] hover:bg-[#FAF8F5] rounded-xl transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <Plus className="w-4 h-4" />
+                    {isUploadingQueue ? (
+                      <Loader2 className="w-4 h-4 text-[#5D2A18] animate-spin" />
+                    ) : (
+                      <Plus className="w-4 h-4" />
+                    )}
                   </button>
 
                   <input
                     type="text"
                     value={inputQuery}
                     onChange={(e) => setInputQuery(e.target.value)}
-                    placeholder={attachedDoc ? `Ask about "${attachedDoc.name}" or indexed documents...` : "Ask a question about your government documents..."}
+                    placeholder={
+                      sessionDocs.length > 0
+                        ? `Ask about ${sessionDocs.length} attached document${sessionDocs.length > 1 ? "s" : ""} or indexed laws...`
+                        : "Ask a question about your government documents..."
+                    }
                     className="flex-1 bg-transparent text-sm text-stone-900 placeholder-stone-400 focus:outline-none px-1"
                   />
 
                   <button
                     type="submit"
-                    disabled={!inputQuery.trim() || isProcessing}
+                    disabled={!inputQuery.trim() || isProcessing || isUploadingQueue}
                     className="w-8 h-8 rounded-xl bg-[#5D2A18] hover:bg-[#431D10] text-white flex items-center justify-center transition-all disabled:opacity-40 disabled:hover:bg-[#5D2A18] cursor-pointer shadow-xs"
                   >
                     <ArrowUp className="w-4 h-4" />
@@ -1784,74 +1938,6 @@ All clauses have been verified against the Central Government Knowledge Base.`,
           </div>
         )}
       </div>
-
-      {/* ========================================================================= */}
-      {/* 3. EVIDENCE / SOURCE DRAWER (Appears ONLY when citation is clicked) */}
-      {/* ========================================================================= */}
-      {activeCitation && (
-        <div className="fixed inset-y-0 right-0 w-full sm:w-96 bg-white border-l border-[#E8E2D8] shadow-2xl z-50 flex flex-col justify-between animate-in slide-in-from-right duration-200">
-          {/* Drawer Header */}
-          <div className="p-4 border-b border-[#E8E2D8] flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-[#5D2A18]" />
-              <h3 className="font-bold text-sm text-stone-900">Evidence</h3>
-            </div>
-            <button
-              onClick={() => setActiveCitation(null)}
-              className="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-[#FAF8F5] rounded-lg transition-colors cursor-pointer"
-              title="Close evidence"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Drawer Body */}
-          <div className="flex-1 p-5 overflow-y-auto space-y-4">
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#8C4A32] block mb-1">
-                {activeCitation.ministry}
-              </span>
-              <h4 className="text-base font-bold text-stone-900 leading-snug">
-                {activeCitation.docTitle}
-              </h4>
-              <p className="text-xs font-mono text-stone-400 mt-1">
-                {activeCitation.gazetteNumber} · {activeCitation.date}
-              </p>
-            </div>
-
-            <div className="px-3 py-1.5 rounded-lg bg-[#FAF8F5] border border-[#E8E2D8] text-xs font-bold text-[#5D2A18]">
-              Page {activeCitation.page} · {activeCitation.section}
-            </div>
-
-            <div className="space-y-1.5">
-              <span className="text-xs font-bold text-stone-700">Relevant provision</span>
-              <div className="p-3.5 bg-[#FAF8F5] border border-[#E8E2D8] rounded-xl text-xs text-stone-800 italic font-serif leading-relaxed">
-                &quot;{activeCitation.quote}&quot;
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between text-xs text-stone-500 pt-2">
-              <span>Grounding confidence:</span>
-              <span className="font-bold text-emerald-700 font-mono">
-                {(activeCitation.confidence * 100).toFixed(0)}% Match
-              </span>
-            </div>
-          </div>
-
-          {/* Drawer Footer */}
-          <div className="p-4 border-t border-[#E8E2D8] bg-[#FAF8F5]">
-            <a
-              href={activeCitation.pdfUrl || "https://egazette.gov.in"}
-              target="_blank"
-              rel="noreferrer"
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#5D2A18] hover:bg-[#431D10] text-white rounded-xl text-xs font-semibold shadow-xs transition-colors"
-            >
-              <span>Open Original Document</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-          </div>
-        </div>
-      )}
 
       {/* ========================================================================= */}
       {/* 4. ONBOARDING & DOMAIN CALIBRATION MODAL */}

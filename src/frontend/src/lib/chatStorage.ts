@@ -203,6 +203,8 @@ export async function getMessagesKeyset(
 
 /**
  * 3. Create or Ensure Conversation
+ * Uses upsert with ignoreDuplicates so calling this twice with the same id
+ * (race condition on refresh) never creates a second DB row.
  */
 export async function createConversation(
   userId: string,
@@ -221,13 +223,24 @@ export async function createConversation(
   };
 
   try {
-    const { data, error } = await supabase
+    // onConflict: if a row with this id already exists, do nothing (no duplicate).
+    // Return the existing row by fetching it when upsert returns nothing.
+    const { data } = await supabase
       .from("conversations")
-      .insert([record])
+      .upsert([record], { onConflict: "id", ignoreDuplicates: true })
       .select()
       .single();
 
     if (data) return data as ConversationRecord;
+
+    // ignoreDuplicates suppressed the return — fetch the existing row instead
+    const { data: existing } = await supabase
+      .from("conversations")
+      .select("id, user_id, title, created_at, updated_at")
+      .eq("id", newId)
+      .single();
+
+    if (existing) return existing as ConversationRecord;
   } catch (e) {
     console.warn("createConversation DB fallback:", e);
   }
@@ -374,7 +387,7 @@ Your mission is to provide accurate, evidence-backed, easily readable answers to
 
 MANDATORY RULES:
 1. Ground your answers strictly in the retrieved official government evidence and any user-attached documents.
-2. For every factual assertion, cite the exact source using [[cite-id]] tags corresponding to the retrieved citations (e.g. [[cite-edu-2025]]).
+2. For every factual assertion, cite the exact source using [[cite-id]] tags corresponding to the retrieved citations (e.g. [[cite-live-1]]).
 3. OUTPUT FORMATTING GUIDELINES:
    - Output must be clean, natural, human-readable text.
    - Do NOT wrap your entire answer in JSON or markdown code-block envelopes (\`\`\`json).
