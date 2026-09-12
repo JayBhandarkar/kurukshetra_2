@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from extractor import DocumentIntelligenceExtractor
 from agent import AgenticRAGOrchestrator
+from retrieval_agent import RetrievalAgent
 from tasks import ingest_pdf_async
 from celery.result import AsyncResult
 from celery_app import celery_app
@@ -40,6 +41,12 @@ class RAGQueryRequest(BaseModel):
     query: str
     ministry: Optional[str] = None
     user_profile: Optional[dict] = None
+
+class RetrievalRequest(BaseModel):
+    query: str
+    ministry: Optional[str] = None
+    user_profile: Optional[dict] = None
+    metadata_filters: Optional[dict] = None  # doc_type, date_from, date_to, financial_year
 
 class IngestAsyncRequest(BaseModel):
     pdf_url: str
@@ -304,7 +311,9 @@ async def upload_user_document(
 @app.post("/api/rag/query")
 def query_rag(req: RAGQueryRequest):
     """
-    Execute 6-stage Multi-Agent RAG pipeline with Domain-First Funnel & Global Fallback
+    Full Multi-Agent RAG pipeline:
+    QueryRouter → multi-query decomposition → RetrievalAgent → VerificationAgent
+    → QA / Summarization / Comparison Agent → merged answer with evidence citations.
     """
     result = AgenticRAGOrchestrator.query(
         user_query=req.query,
@@ -312,6 +321,63 @@ def query_rag(req: RAGQueryRequest):
         user_profile=req.user_profile
     )
     return result
+
+@app.post("/api/retrieval/query")
+def retrieval_query(req: RetrievalRequest):
+    """
+    Retrieval Agent — 8-stage hybrid retrieval pipeline:
+    Query optimisation → embedding → domain-scoped pgvector search →
+    metadata filtering → composite ranking → global fallback.
+
+    Returns ranked document chunks with citations ready for the synthesis agent.
+    """
+    try:
+        result = RetrievalAgent.retrieve_from_query(
+            query=req.query,
+            user_profile=req.user_profile or {},
+            metadata_filters=req.metadata_filters or {},
+            explicit_ministry=req.ministry,
+        )
+        return {
+            "query": result.query,
+            "optimised_query": {
+                "search_text":     result.optimised_query.search_text,
+                "keywords":        result.optimised_query.keywords,
+                "act_names":       result.optimised_query.act_names,
+                "section_numbers": result.optimised_query.section_numbers,
+                "policy_names":    result.optimised_query.policy_names,
+                "date_references": result.optimised_query.date_references,
+                "ministry_hint":   result.optimised_query.ministry_hint,
+            },
+            "chunks": [
+                {
+                    "id":               c.id,
+                    "document_id":      c.document_id,
+                    "doc_title":        c.doc_title,
+                    "ministry":         c.ministry,
+                    "gazette_number":   c.gazette_number,
+                    "doc_type":         c.doc_type,
+                    "publication_date": c.publication_date,
+                    "financial_year":   c.financial_year,
+                    "page_number":      c.page_number,
+                    "section":          c.section,
+                    "clause":           c.clause,
+                    "content":          c.content,
+                    "similarity":       c.similarity,
+                    "authority_score":  c.authority_score,
+                    "composite_score":  c.composite_score,
+                }
+                for c in result.chunks
+            ],
+            "search_mode":          result.search_mode,
+            "domain_applied":       result.domain_applied,
+            "ministries_searched":  result.ministries_searched,
+            "filters_applied":      result.filters_applied,
+            "total_found":          result.total_found,
+            "processing_notes":     result.processing_notes,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Retrieval agent error: {str(e)}")
 
 @app.post("/api/tasks/ingest")
 def start_async_ingest(req: IngestAsyncRequest):

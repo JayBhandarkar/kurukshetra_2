@@ -88,88 +88,6 @@ export interface DocumentItem {
   clausesCount: number;
 }
 
-// Pre-seeded Evidence Citations
-const CITATION_STORE: Record<string, Citation> = {
-  "cite-edu-2025": {
-    id: "cite-edu-2025",
-    docTitle: "Notification No. 24/2025 (NEP Framework)",
-    ministry: "Ministry of Education",
-    gazetteNumber: "F.No. 12-4/2025-U.Policy",
-    date: "12 Jan 2025",
-    page: 7,
-    section: "Section 4.2",
-    clause: "Clause 4.2(a) - Application Deadlines",
-    quote: "Applicants must submit applications within 45 days from the date of publication in the Official Gazette, extending the prior 30-day mandate under Sub-clause (1).",
-    confidence: 0.98,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  "cite-edu-exp": {
-    id: "cite-edu-exp",
-    docTitle: "Notification No. 24/2025 (NEP Framework)",
-    ministry: "Ministry of Education",
-    gazetteNumber: "F.No. 12-4/2025-U.Policy",
-    date: "12 Jan 2025",
-    page: 8,
-    section: "Section 5.1",
-    clause: "Section 5.1 - Experience Requirements",
-    quote: "The minimum required institutional experience for program coordinator accreditation is enhanced from two (2) years to three (3) years of continuous academic tenure.",
-    confidence: 0.96,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  "cite-edu-exemption": {
-    id: "cite-edu-exemption",
-    docTitle: "Notification No. 24/2025 (NEP Framework)",
-    ministry: "Ministry of Education",
-    gazetteNumber: "F.No. 12-4/2025-U.Policy",
-    date: "12 Jan 2025",
-    page: 9,
-    section: "Section 5.3",
-    clause: "Section 5.3 - Transitional Exemptions",
-    quote: "The provisional exemption previously granted to Category X standalone technical institutes is repealed effective the academic cycle 2025-26.",
-    confidence: 0.94,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  "cite-fin-tds": {
-    id: "cite-fin-tds",
-    docTitle: "Circular No. 04/2025 (Direct Tax Provisions)",
-    ministry: "Ministry of Finance",
-    gazetteNumber: "CBDT/2025/CIR-04",
-    date: "03 Mar 2025",
-    page: 4,
-    section: "Section 195(2)",
-    clause: "Rule 37BB - Digital Verification",
-    quote: "All physical documentation mandates under Form 15CA/CB are substituted with DigiLocker cryptographically signed tokens verified via the National Single Sign-On API.",
-    confidence: 0.98,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  "cite-pmay-subsidy": {
-    id: "cite-pmay-subsidy",
-    docTitle: "PMAY-G Phase III Allocation Guidelines",
-    ministry: "Ministry of Rural Development",
-    gazetteNumber: "MORD/PMAYG/III/2024",
-    date: "18 Nov 2024",
-    page: 12,
-    section: "Section 6.2",
-    clause: "Clause 6.2(a) - Unit Cost Norms",
-    quote: "The unit assistance is revised to ₹1.20 lakh in plain areas and ₹1.30 lakh in hilly states, subject to mandatory 3-tier geotagged asset verification prior to tranche release.",
-    confidence: 0.97,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  "cite-health-fhir": {
-    id: "cite-health-fhir",
-    docTitle: "Ayushman Digital Mission Interoperability Standards",
-    ministry: "Ministry of Health",
-    gazetteNumber: "ABDM/GO-88/2025",
-    date: "21 Feb 2025",
-    page: 6,
-    section: "Section 3.4",
-    clause: "FHIR Protocol Interoperability",
-    quote: "Tier-1 and Tier-2 healthcare facilities must complete HL7 FHIR Release 4 standard integration for electronic health record data sharing by June 30, 2025.",
-    confidence: 0.95,
-    pdfUrl: "https://egazette.gov.in",
-  },
-};
-
 // Initial Document Library
 const INITIAL_DOCUMENTS: DocumentItem[] = [
   {
@@ -484,16 +402,20 @@ export default function AuthenticatedApp() {
             })) : [],
           }));
 
-          setSessions((prev) =>
-            prev.map((s) => (s.id === convId ? { ...s, messages: mappedMessages } : s))
-          );
+          // Only update if we actually got messages back — never overwrite with empty
+          if (mappedMessages.length > 0) {
+            setSessions((prev) =>
+              prev.map((s) => (s.id === convId ? { ...s, messages: mappedMessages } : s))
+            );
+          }
           setMessagesCursor(result.nextCursor);
           setHasMoreMessages(result.hasMore);
           return;
         }
       }
     } catch (e) {
-      console.warn("Could not fetch remote messages, using local store:", e);
+      // Silently keep whatever messages are already in state — do not wipe them
+      console.warn("Could not fetch remote messages, keeping local state:", e);
     }
   };
 
@@ -653,7 +575,12 @@ export default function AuthenticatedApp() {
     setCurrentSessionId(sessionId);
     setActiveView("chat");
     setActiveCitation(null);
-    if (user?.email) {
+
+    // Only fetch from DB if we don't already have messages cached in state.
+    // This prevents messages from disappearing when switching back to a
+    // conversation that was already loaded.
+    const existing = sessions.find((s) => s.id === sessionId);
+    if (user?.email && (!existing?.messages || existing.messages.length === 0)) {
       loadConversationMessages(sessionId, user.email);
     }
   };
@@ -802,6 +729,11 @@ export default function AuthenticatedApp() {
     const userMsgId = `user-${Date.now()}`;
     const assistantMsgId = `asst-${Date.now()}`;
 
+    // Snapshot the active session ID at the moment the message is sent.
+    // All subsequent state updates reference this captured ID — never the
+    // potentially-stale `currentSessionId` from the closure.
+    const activeSessionId = currentSessionId;
+
     const userMessage: ChatMessage = {
       id: userMsgId,
       role: "user",
@@ -809,15 +741,18 @@ export default function AuthenticatedApp() {
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
 
-    // Update active session with user message
-    const updatedMessages = [...(currentSession.messages || []), userMessage];
-    const updatedSession = {
-      ...currentSession,
-      title: currentSession.messages.length === 0 ? text.slice(0, 42) : currentSession.title,
-      messages: updatedMessages,
-    };
-
-    setSessions(sessions.map((s) => (s.id === currentSessionId ? updatedSession : s)));
+    // Append user message using functional updater so we always operate on
+    // the latest state, never a stale closure snapshot.
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== activeSessionId) return s;
+        return {
+          ...s,
+          title: s.messages.length === 0 ? text.slice(0, 42) : s.title,
+          messages: [...(s.messages || []), userMessage],
+        };
+      })
+    );
 
     // Begin Live AI Agent Processing Sequence
     setIsProcessing(true);
@@ -835,7 +770,7 @@ export default function AuthenticatedApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: text.trim(),
-          conversationId: currentSession.id,
+          conversationId: activeSessionId,
           userId: user?.email || "anonymous-user",
           attachedDocuments: sessionDocs
             .filter((d) => d.status === "ready")
@@ -878,61 +813,47 @@ export default function AuthenticatedApp() {
         ],
       };
 
-      const finalSession = {
-        ...updatedSession,
-        // If the API assigned a real DB UUID (replacing our local "session-" draft id), use it
-        id: data.conversationId || updatedSession.id,
-        docCount: data.citations?.length || 1,
-        messages: [...updatedMessages, assistantMessage],
-      };
+      // The API may return a real DB UUID to replace our local "session-" draft id.
+      const returnedId: string = data.conversationId || activeSessionId;
 
-      // If the session ID changed (local draft → real DB UUID), update currentSessionId too
-      const prevId = currentSessionId;
-      const newId = finalSession.id;
       setSessions((prev) =>
-        prev.map((s) => (s.id === prevId ? finalSession : s))
+        prev.map((s) => {
+          if (s.id !== activeSessionId) return s;
+          return {
+            ...s,
+            id: returnedId,
+            docCount: data.citations?.length || 1,
+            // Append to whatever messages are already in state (never overwrite from closure)
+            messages: [...(s.messages || []), assistantMessage],
+          };
+        })
       );
-      if (newId !== prevId) {
-        setCurrentSessionId(newId);
+
+      // If the DB assigned a new UUID, update the active session pointer
+      if (returnedId !== activeSessionId) {
+        setCurrentSessionId(returnedId);
       }
     } catch (err) {
-      console.warn("Live RAG API fallback:", err);
-      // High-precision fallback
-      const fallbackCitation = CITATION_STORE["cite-edu-2025"];
-      const assistantMessage: ChatMessage & { followUps?: string[] } = {
+      console.error("RAG query error:", err);
+      const assistantMessage: ChatMessage = {
         id: assistantMsgId,
         role: "assistant",
-        content: `### Response from Indexed Sovereign Documents
-
-Under the official regulatory provisions indexed in Pramaan:
-
-1. **Procedural Timelines**: Application and reporting windows follow a standard 45-day cycle from official gazette publication.
-[[cite-edu-2025]]
-
-2. **Digital Verification**: Form submissions across central departments accept cryptographically signed tokens via DigiLocker API.
-[[cite-fin-tds]]
-
-All clauses have been verified against the Central Government Knowledge Base.`,
+        content: "Unable to retrieve an answer at this time. Please check that the AI service is running and your documents are indexed, then try again.",
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        processingStages: [
-          "Query Understanding",
-          "Orchestrator Agent",
-          "Hybrid Retrieval (pgvector + Knowledge Graph)",
-          "Reasoning & Comparison",
-          "Evidence Validation",
-          "Response Generation",
-        ],
-        citations: [fallbackCitation, CITATION_STORE["cite-fin-tds"]],
-        followUps: ["Compare with earlier 2024 circulars", "Show exact gazette citation text"],
+        processingStages: [],
+        citations: [],
       };
 
-      const finalSession = {
-        ...updatedSession,
-        docCount: 2,
-        messages: [...updatedMessages, assistantMessage],
-      };
-
-      setSessions(sessions.map((s) => (s.id === currentSessionId ? finalSession : s)));
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== activeSessionId) return s;
+          return {
+            ...s,
+            docCount: 0,
+            messages: [...(s.messages || []), assistantMessage],
+          };
+        })
+      );
     } finally {
       clearTimeout(stepTimer1);
       clearTimeout(stepTimer2);
@@ -958,7 +879,7 @@ All clauses have been verified against the Central Government Knowledge Base.`,
       const match = part.match(/\[\[(cite-[a-zA-Z0-9-]+)\]\]/);
       if (match) {
         const citeId = match[1];
-        const citation = CITATION_STORE[citeId] || citations?.find((c) => c.id === citeId);
+        const citation = citations?.find((c) => c.id === citeId);
         if (!citation) return null;
 
         const isSelected = activeCitation?.id === citation.id;
@@ -968,16 +889,13 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             key={idx}
             type="button"
             onClick={() => setActiveCitation(citation)}
-            className={`inline-flex items-center gap-1.5 px-2 py-0.5 mx-1 my-0.5 rounded-md text-[11px] font-semibold font-mono transition-all cursor-pointer border ${
-              isSelected
-                ? "bg-[#5D2A18] text-white border-[#5D2A18] shadow-xs"
-                : "bg-[#F3EFEA] hover:bg-[#EAE3D9] text-[#5D2A18] border-[#E5DFD7] hover:border-[#D5CBC0]"
-            }`}
-            title="Click to view verified source evidence"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded text-[10px] font-medium text-[#8C4A32] bg-[#F9F3ED] hover:bg-[#F0E6D8] border border-[#E8DDD3] transition-colors cursor-pointer whitespace-nowrap"
+            title={`${citation.docTitle} · p.${citation.page}`}
           >
-            <BookOpen className="w-3 h-3" />
+            <span className="opacity-50 text-[9px]">↗</span>
             <span>
-              [{citation.docTitle ? citation.docTitle.split("(")[0].trim() : "Verified Doc"} {citation.page ? `· p.${citation.page}` : ""} {citation.section ? `· ${citation.section}` : ""}]
+              {(citation.docTitle || "Source").trim().slice(0, 24)}
+              {citation.page ? ` · p.${citation.page}` : ""}
             </span>
           </button>
         );
@@ -1005,15 +923,26 @@ All clauses have been verified against the Central Government Knowledge Base.`,
   const renderFormattedLine = (line: string, citations?: Citation[]) => {
     const trimmed = line.trim();
 
+    // 0. Horizontal rule (---) — section divider between sub-query answers
+    if (trimmed === "---") {
+      return <hr className="border-t border-[#E8E2D8] my-3" />;
+    }
+
     // 1. Markdown Headers (#, ##, ###, ####)
     const headerMatch = trimmed.match(/^(#{1,4})\s+(.+)$/);
     if (headerMatch) {
       const level = headerMatch[1].length;
       const title = headerMatch[2];
       if (level <= 2) {
-        return <h3 className="font-bold text-base text-stone-900 mt-3 mb-1">{renderInlineContent(title, citations)}</h3>;
+        return <h3 className="font-bold text-base text-stone-900 mt-4 mb-1">{renderInlineContent(title, citations)}</h3>;
       }
       return <h4 className="font-semibold text-sm text-stone-900 mt-2 mb-0.5">{renderInlineContent(title, citations)}</h4>;
+    }
+
+    // 1b. Standalone **bold line** used as a section header (e.g. **1. Question text**)
+    const standaloneBold = trimmed.match(/^\*\*(.+)\*\*$/);
+    if (standaloneBold) {
+      return <h3 className="font-bold text-[15px] text-stone-900 mt-4 mb-1">{renderInlineContent(standaloneBold[1], citations)}</h3>;
     }
 
     // 2. Bullet Lists (- or * or •)
@@ -1223,11 +1152,7 @@ All clauses have been verified against the Central Government Knowledge Base.`,
             return displaySessions.map((s) => (
               <div
                 key={s.id}
-                onClick={() => {
-                  setCurrentSessionId(s.id);
-                  setActiveView("chat");
-                  setActiveCitation(null);
-                }}
+                onClick={() => selectConversation(s.id)}
                 className={`group flex items-center justify-between px-2 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer ${
                   currentSessionId === s.id && activeView === "chat"
                     ? "bg-[#EAE3D9] text-[#1E1A17] font-medium"
@@ -1454,7 +1379,7 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                       {msg.role === "user" ? (
                         /* User Message */
                         <div className="flex justify-end">
-                          <div className="bg-[#EFE9E0] text-[#1E1A17] px-4 py-2.5 rounded-full text-sm max-w-[85%] sm:max-w-[75%] leading-relaxed font-medium">
+                          <div className="bg-[#EFE9E0] text-[#1E1A17] px-4 py-2.5 rounded-2xl text-sm max-w-[85%] sm:max-w-[75%] leading-relaxed font-medium">
                             {msg.content}
                           </div>
                         </div>
@@ -1465,6 +1390,47 @@ All clauses have been verified against the Central Government Knowledge Base.`,
                             {/* Cited Assistant Content + Actions inside white box */}
                             <div className="bg-white border border-[#E8E2D8] p-5 rounded-2xl shadow-xs">
                               {renderMessageContent(msg.content, msg.citations)}
+
+                              {/* ── Sources / Citations Panel ── */}
+                              {msg.citations && msg.citations.length > 0 && (
+                                <div className="mt-3 pt-3 border-t border-[#F0EBE3]">
+                                  <div className="flex items-center gap-1.5 mb-2">
+                                    <BookOpen className="w-3 h-3 text-[#8C4A32]" />
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#8C4A32]">
+                                      Sources
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {msg.citations.map((cit, citIdx) => (
+                                      <button
+                                        key={cit.id || citIdx}
+                                        type="button"
+                                        onClick={() => setActiveCitation(cit)}
+                                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-left cursor-pointer transition-colors ${
+                                          activeCitation?.id === cit.id
+                                            ? "bg-[#F5EDE3] border-[#D4A97A]"
+                                            : "bg-[#FAF8F5] border-[#E8E2D8] hover:bg-[#F3EDE4] hover:border-[#C9956A]"
+                                        }`}
+                                      >
+                                        <span className="flex-shrink-0 w-3.5 h-3.5 rounded-full bg-[#5D2A18] text-white text-[8px] font-bold flex items-center justify-center">
+                                          {citIdx + 1}
+                                        </span>
+                                        <span className="text-[11px] font-medium text-stone-800 leading-none">
+                                          {(cit.docTitle || "Document").trim().slice(0, 30)}
+                                        </span>
+                                        {cit.page && (
+                                          <span className="text-[10px] font-mono text-stone-400 leading-none">
+                                            p.{cit.page}
+                                          </span>
+                                        )}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+
+
                               <div className="flex items-center gap-1 text-stone-400 mt-3 pt-3 border-t border-[#F0EBE3]">
                                 <button
                                   onClick={() => copyToClipboard(msg.content, msg.id)}
@@ -1968,74 +1934,6 @@ All clauses have been verified against the Central Government Knowledge Base.`,
           </div>
         )}
       </div>
-
-      {/* ========================================================================= */}
-      {/* 3. EVIDENCE / SOURCE DRAWER (Appears ONLY when citation is clicked) */}
-      {/* ========================================================================= */}
-      {activeCitation && (
-        <div className="fixed inset-y-0 right-0 w-full sm:w-96 bg-white border-l border-[#E8E2D8] shadow-2xl z-50 flex flex-col justify-between animate-in slide-in-from-right duration-200">
-          {/* Drawer Header */}
-          <div className="p-4 border-b border-[#E8E2D8] flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-[#5D2A18]" />
-              <h3 className="font-bold text-sm text-stone-900">Evidence</h3>
-            </div>
-            <button
-              onClick={() => setActiveCitation(null)}
-              className="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-[#FAF8F5] rounded-lg transition-colors cursor-pointer"
-              title="Close evidence"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Drawer Body */}
-          <div className="flex-1 p-5 overflow-y-auto space-y-4">
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#8C4A32] block mb-1">
-                {activeCitation.ministry}
-              </span>
-              <h4 className="text-base font-bold text-stone-900 leading-snug">
-                {activeCitation.docTitle}
-              </h4>
-              <p className="text-xs font-mono text-stone-400 mt-1">
-                {activeCitation.gazetteNumber} · {activeCitation.date}
-              </p>
-            </div>
-
-            <div className="px-3 py-1.5 rounded-lg bg-[#FAF8F5] border border-[#E8E2D8] text-xs font-bold text-[#5D2A18]">
-              Page {activeCitation.page} · {activeCitation.section}
-            </div>
-
-            <div className="space-y-1.5">
-              <span className="text-xs font-bold text-stone-700">Relevant provision</span>
-              <div className="p-3.5 bg-[#FAF8F5] border border-[#E8E2D8] rounded-xl text-xs text-stone-800 italic font-serif leading-relaxed">
-                &quot;{activeCitation.quote}&quot;
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between text-xs text-stone-500 pt-2">
-              <span>Grounding confidence:</span>
-              <span className="font-bold text-emerald-700 font-mono">
-                {(activeCitation.confidence * 100).toFixed(0)}% Match
-              </span>
-            </div>
-          </div>
-
-          {/* Drawer Footer */}
-          <div className="p-4 border-t border-[#E8E2D8] bg-[#FAF8F5]">
-            <a
-              href={activeCitation.pdfUrl || "https://egazette.gov.in"}
-              target="_blank"
-              rel="noreferrer"
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#5D2A18] hover:bg-[#431D10] text-white rounded-xl text-xs font-semibold shadow-xs transition-colors"
-            >
-              <span>Open Original Document</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-          </div>
-        </div>
-      )}
 
       {/* ========================================================================= */}
       {/* 4. ONBOARDING & DOMAIN CALIBRATION MODAL */}

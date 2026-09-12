@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { openai, createEmbedding } from "@/lib/openaiClient";
 import { supabase } from "@/lib/supabaseClient";
+
+// Allow compound multi-query requests up to 90 seconds
+// (3–4 sub-queries × ~15s each + buffer)
+export const maxDuration = 90;
 import {
   saveMessageWithCitations,
   buildBoundedContext,
@@ -20,88 +24,6 @@ interface MatchedChunk {
   clause: string;
   similarity: number;
 }
-
-// Fallback sovereign knowledge base if Supabase pgvector table has not been populated yet
-const DEFAULT_KNOWLEDGE_BASE = [
-  {
-    id: "cite-edu-2025",
-    docTitle: "Notification No. 24/2025 (NEP Framework)",
-    ministry: "Ministry of Education",
-    gazetteNumber: "F.No. 12-4/2025-U.Policy",
-    date: "12 Jan 2025",
-    page: 7,
-    section: "Section 4.2",
-    clause: "Clause 4.2(a) - Application Deadlines",
-    quote: "Applicants must submit applications within 45 days from the date of publication in the Official Gazette, extending the prior 30-day mandate under Sub-clause (1).",
-    confidence: 0.98,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  {
-    id: "cite-edu-exp",
-    docTitle: "Notification No. 24/2025 (NEP Framework)",
-    ministry: "Ministry of Education",
-    gazetteNumber: "F.No. 12-4/2025-U.Policy",
-    date: "12 Jan 2025",
-    page: 8,
-    section: "Section 5.1",
-    clause: "Section 5.1 - Experience Requirements",
-    quote: "The minimum required institutional experience for program coordinator accreditation is enhanced from two (2) years to three (3) years of continuous academic tenure.",
-    confidence: 0.96,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  {
-    id: "cite-edu-exemption",
-    docTitle: "Notification No. 24/2025 (NEP Framework)",
-    ministry: "Ministry of Education",
-    gazetteNumber: "F.No. 12-4/2025-U.Policy",
-    date: "12 Jan 2025",
-    page: 9,
-    section: "Section 5.3",
-    clause: "Section 5.3 - Transitional Exemptions",
-    quote: "The provisional exemption previously granted to Category X standalone technical institutes is repealed effective the academic cycle 2025-26.",
-    confidence: 0.94,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  {
-    id: "cite-fin-tds",
-    docTitle: "Circular No. 04/2025 (Direct Tax Provisions)",
-    ministry: "Ministry of Finance",
-    gazetteNumber: "CBDT/2025/CIR-04",
-    date: "03 Mar 2025",
-    page: 4,
-    section: "Section 195(2)",
-    clause: "Rule 37BB - Digital Verification",
-    quote: "All physical documentation mandates under Form 15CA/CB are substituted with DigiLocker cryptographically signed tokens verified via the National Single Sign-On API.",
-    confidence: 0.98,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  {
-    id: "cite-pmay-subsidy",
-    docTitle: "PMAY-G Phase III Allocation Guidelines",
-    ministry: "Ministry of Rural Development",
-    gazetteNumber: "MORD/PMAYG/III/2024",
-    date: "18 Nov 2024",
-    page: 12,
-    section: "Section 6.2",
-    clause: "Clause 6.2(a) - Unit Cost Norms",
-    quote: "The unit assistance is revised to ₹1.20 lakh in plain areas and ₹1.30 lakh in hilly states, subject to mandatory 3-tier geotagged asset verification prior to tranche release.",
-    confidence: 0.97,
-    pdfUrl: "https://egazette.gov.in",
-  },
-  {
-    id: "cite-health-fhir",
-    docTitle: "Ayushman Digital Mission Interoperability Standards",
-    ministry: "Ministry of Health",
-    gazetteNumber: "ABDM/GO-88/2025",
-    date: "21 Feb 2025",
-    page: 6,
-    section: "Section 3.4",
-    clause: "FHIR Protocol Interoperability",
-    quote: "Tier-1 and Tier-2 healthcare facilities must complete HL7 FHIR Release 4 standard integration for electronic health record data sharing by June 30, 2025.",
-    confidence: 0.95,
-    pdfUrl: "https://egazette.gov.in",
-  },
-];
 
 export async function POST(request: Request) {
   try {
@@ -141,7 +63,7 @@ export async function POST(request: Request) {
             role: "Legal Counsel / Advocate",
           },
         }),
-        signal: AbortSignal.timeout(12000),
+        signal: AbortSignal.timeout(75000), // 75s — supports up to 4 compound sub-queries
       });
 
       if (aiFastApiRes.ok) {
@@ -263,45 +185,10 @@ export async function POST(request: Request) {
         contextText += `[Citation Tag: [[${citeId}]]]\nDocument: ${chunk.doc_title} (${chunk.ministry})\nPage: ${chunk.page_number}, Section: ${chunk.section}, Clause: ${chunk.clause}\nContent:\n"${chunk.content}"\n\n`;
       });
     } else {
-      // Use sovereign knowledge base matches
-      const lower = cleanQuery.toLowerCase();
-      const relevant = DEFAULT_KNOWLEDGE_BASE.filter((k) => {
-        if (lower.includes("education") || lower.includes("2024") || lower.includes("2025") || lower.includes("nep") || lower.includes("change")) {
-          return k.docTitle.includes("Education");
-        }
-        if (lower.includes("tds") || lower.includes("tax") || lower.includes("finance") || lower.includes("remittance") || lower.includes("37bb")) {
-          return k.docTitle.includes("Finance");
-        }
-        if (lower.includes("pmay") || lower.includes("subsidy") || lower.includes("rural") || lower.includes("housing")) {
-          return k.docTitle.includes("Rural");
-        }
-        if (lower.includes("fhir") || lower.includes("ayushman") || lower.includes("health")) {
-          return k.docTitle.includes("Health");
-        }
-        return true;
-      });
-
-      const selected = relevant.length > 0 ? relevant.slice(0, 3) : DEFAULT_KNOWLEDGE_BASE.slice(0, 3);
-      selected.forEach((k) => {
-        citationsToPersist.push({
-          id: k.id,
-          doc_title: k.docTitle,
-          docTitle: k.docTitle,
-          ministry: k.ministry,
-          gazette_number: k.gazetteNumber,
-          gazetteNumber: k.gazetteNumber,
-          date: k.date,
-          page_number: k.page,
-          page: k.page,
-          section: k.section,
-          clause: k.clause,
-          quote: k.quote,
-          confidence: k.confidence,
-          pdf_url: k.pdfUrl,
-          pdfUrl: k.pdfUrl,
-        });
-        contextText += `[Citation Tag: [[${k.id}]]]\nDocument: ${k.docTitle} (${k.ministry})\nPage: ${k.page}, Section: ${k.section}, Clause: ${k.clause}\nExact Provision Quote:\n"${k.quote}"\n\n`;
-      });
+      // No matching chunks found in pgvector — do not fabricate citations.
+      // GPT will answer with what it knows but no [[cite-id]] tags will be injected,
+      // so the Sources panel will correctly show nothing.
+      contextText = "No indexed government documents matched this query. Answer only from well-known public statutory knowledge and clearly state that no indexed source was found.";
     }
 
     // 4. Assemble Bounded LLM Context
