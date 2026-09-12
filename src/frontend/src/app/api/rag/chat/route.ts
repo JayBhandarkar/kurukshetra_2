@@ -59,7 +59,7 @@ export async function POST(request: Request) {
           query: cleanQuery,
           ministry: ministry && ministry !== "All" && ministry !== "All Ministries" ? ministry : null,
           user_profile: userProfile || {
-            primary_domain: "Banking, Finance & Tax",
+            primary_domain: "General Sovereign Administration",
             role: "Legal Counsel / Advocate",
           },
         }),

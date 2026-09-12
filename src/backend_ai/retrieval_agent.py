@@ -272,6 +272,13 @@ def _parse_optimised_query(raw_json: str, original: str) -> OptimisedQuery:
 def _map_chunk(raw: dict) -> RetrievedChunk:
     """Convert a raw Supabase row into a typed RetrievedChunk."""
     ministry   = raw.get("ministry", "Government of India")
+    # RPC returns doc_title; direct table select returns title
+    doc_title  = raw.get("doc_title") or raw.get("title") or "Official Gazette"
+    # Try metadata fallback for doc_title (chunks uploaded via user-upload pipeline)
+    if doc_title == "Official Gazette":
+        meta = raw.get("metadata") or {}
+        if isinstance(meta, dict):
+            doc_title = meta.get("doc_title", doc_title)
     pub_date   = raw.get("publication_date") or raw.get("date")
     similarity = float(raw.get("similarity", 0.0))
     authority  = _authority_score(ministry)
@@ -280,12 +287,12 @@ def _map_chunk(raw: dict) -> RetrievedChunk:
     return RetrievedChunk(
         id=raw.get("id", ""),
         document_id=raw.get("document_id", ""),
-        doc_title=raw.get("doc_title", raw.get("title", "Official Gazette")),
+        doc_title=doc_title,
         ministry=ministry,
         gazette_number=raw.get("gazette_number", ""),
         doc_type=raw.get("doc_type", "Notification"),
         publication_date=str(pub_date) if pub_date else None,
-        financial_year=raw.get("financial_year"),
+        financial_year=raw.get("financial_year"),  # None if not in schema — handled gracefully
         page_number=int(raw.get("page_number", 1)),
         section=raw.get("section", ""),
         clause=raw.get("clause", ""),
@@ -532,56 +539,89 @@ class RetrievalAgent:
 
     @staticmethod
     def _tiered_retrieval(
-        query_vector:      list[float],
+        query_vector:       list[float],
         effective_ministry: Optional[str],
-        primary_domain:    str,
-        scope_ministries:  list[str],
-        notes:             list[str],
+        primary_domain:     str,
+        scope_ministries:   list[str],
+        notes:              list[str],
     ) -> tuple[list[dict], str, list[str]]:
         raw_chunks:          list[dict] = []
         ministries_searched: list[str]  = []
-        search_mode:         str        = "GLOBAL_FALLBACK"
+        search_mode:         str        = "GLOBAL_SOVEREIGN_FALLBACK"
 
-        # Tier 1a — explicit ministry filter
+        # Helper: deduplicated extend
+        def _extend(dest: list[dict], src: list[dict], seen: set[str]) -> None:
+            for row in src:
+                if row["id"] not in seen:
+                    dest.append(row)
+                    seen.add(row["id"])
+
+        seen_ids: set[str] = set()
+
+        # ------------------------------------------------------------------
+        # Tier 1a — explicit ministry filter (query router or optimiser hint)
+        # Runs regardless of whether the ministry belongs to the user's domain.
+        # This is intentional: CERT-In / MeitY queries must succeed even when
+        # the user's profile domain is "Banking, Finance & Tax".
+        # ------------------------------------------------------------------
         if effective_ministry:
             rows = _pgvector_search(query_vector, _TIER1_THRESHOLD, 5, effective_ministry)
             if rows:
-                raw_chunks      = rows
-                search_mode     = f"EXPLICIT_MINISTRY_SCOPED ({effective_ministry})"
+                _extend(raw_chunks, rows, seen_ids)
+                search_mode = f"EXPLICIT_MINISTRY_SCOPED ({effective_ministry})"
                 ministries_searched.append(effective_ministry)
                 notes.append(f"Tier 1a: {len(rows)} chunks from '{effective_ministry}'")
+            else:
+                notes.append(f"Tier 1a: 0 chunks from '{effective_ministry}' (below threshold)")
 
-        # Tier 1b — domain funnel across top N ministries
-        if not raw_chunks and scope_ministries:
-            seen_ids: set[str] = set()
+        # ------------------------------------------------------------------
+        # Tier 1b — domain funnel across the user's domain ministries.
+        # Skipped only when an explicit ministry already returned enough chunks.
+        # ------------------------------------------------------------------
+        if len(raw_chunks) < _MIN_CHUNKS_PASS and scope_ministries:
+            tier1b_count_before = len(raw_chunks)
             for ministry in scope_ministries[:_TIER1_MAX_MIN]:
-                rows = _pgvector_search(query_vector, _TIER1_THRESHOLD, _TIER1_PER_MIN, ministry)
-                ministries_searched.append(ministry)
-                for row in rows:
-                    if row["id"] not in seen_ids:
-                        raw_chunks.append(row)
-                        seen_ids.add(row["id"])
-            if raw_chunks:
-                search_mode = "DOMAIN_FUNNEL_PRIORITIZED"
-                notes.append(f"Tier 1b: {len(raw_chunks)} chunks from domain funnel ({primary_domain})")
+                if ministry not in ministries_searched:
+                    rows = _pgvector_search(query_vector, _TIER1_THRESHOLD, _TIER1_PER_MIN, ministry)
+                    ministries_searched.append(ministry)
+                    _extend(raw_chunks, rows, seen_ids)
+            added = len(raw_chunks) - tier1b_count_before
+            if added:
+                search_mode = (
+                    "EXPLICIT_MINISTRY_PLUS_DOMAIN"
+                    if effective_ministry
+                    else "DOMAIN_FUNNEL_PRIORITIZED"
+                )
+                notes.append(f"Tier 1b: +{added} chunks from domain funnel ({primary_domain})")
+            else:
+                notes.append(f"Tier 1b: 0 additional chunks from domain funnel ({primary_domain})")
 
-        # Tier 2 — global fallback
-        if len(raw_chunks) < _MIN_CHUNKS_PASS:
-            notes.append(f"Tier 2 triggered ({len(raw_chunks)} domain chunks — below threshold)")
-            global_rows = _pgvector_search(query_vector, _TIER2_THRESHOLD, _TIER2_COUNT, None)
-            seen_ids    = {c["id"] for c in raw_chunks}
-            new_chunks  = [r for r in global_rows if r["id"] not in seen_ids]
-            raw_chunks.extend(new_chunks)
-            search_mode = (
-                "CROSS_DOMAIN_EXPANDED"
-                if search_mode == "DOMAIN_FUNNEL_PRIORITIZED"
-                else "GLOBAL_SOVEREIGN_FALLBACK"
-            )
-            for r in new_chunks:
-                m = r.get("ministry", "Unknown")
-                if m not in ministries_searched:
-                    ministries_searched.append(m)
-            notes.append(f"Tier 2: +{len(new_chunks)} global chunks")
+        # ------------------------------------------------------------------
+        # Tier 2 — global fallback.
+        # ALWAYS runs as a supplement to ensure cross-domain queries are never
+        # blocked by the user's profile domain. Uses a wide threshold (0.30)
+        # so semantically relevant chunks from any ministry are captured.
+        # Chunks already found in Tier 1a/1b are deduplicated away.
+        # ------------------------------------------------------------------
+        global_rows = _pgvector_search(query_vector, _TIER2_THRESHOLD, _TIER2_COUNT, None)
+        tier2_count_before = len(raw_chunks)
+        _extend(raw_chunks, global_rows, seen_ids)
+        new_from_tier2 = len(raw_chunks) - tier2_count_before
+
+        for r in global_rows:
+            m = r.get("ministry", "Unknown")
+            if m not in ministries_searched:
+                ministries_searched.append(m)
+
+        if new_from_tier2:
+            notes.append(f"Tier 2 (global): +{new_from_tier2} cross-domain chunks added")
+            # Only override search_mode to GLOBAL if Tier 1 found nothing
+            if search_mode == "GLOBAL_SOVEREIGN_FALLBACK":
+                search_mode = "GLOBAL_SOVEREIGN_FALLBACK"
+            else:
+                search_mode = "CROSS_DOMAIN_EXPANDED"
+        else:
+            notes.append("Tier 2 (global): no new chunks beyond Tier 1 results")
 
         return raw_chunks, search_mode, ministries_searched
 

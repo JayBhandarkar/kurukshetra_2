@@ -1,18 +1,24 @@
--- Drop all existing overloaded versions to eliminate the 300 Multiple Choices error
+-- =========================================================================
+-- Fix: match_document_chunks RPC Function
+-- Run this in Supabase SQL Editor → New Query → Run
+--
+-- Problem: Previous version referenced d.financial_year which does not
+-- exist in the documents table, causing error 42703 on every query.
+-- =========================================================================
+
+-- Drop all existing overloaded versions to eliminate any 300 Multiple Choices error
 DROP FUNCTION IF EXISTS match_document_chunks(vector, int, text);
 DROP FUNCTION IF EXISTS match_document_chunks(vector, float, int, text);
 DROP FUNCTION IF EXISTS match_document_chunks(vector(1536), int, text);
 DROP FUNCTION IF EXISTS match_document_chunks(vector(1536), float, int, text);
+DROP FUNCTION IF EXISTS match_document_chunks(vector(1536), float, int, text, text);
 
--- Single canonical version used by both Python agent and Next.js fallback
--- Parameters match exactly what retrieval_agent.py and route.ts send:
---   query_embedding  : the 1536-dim query vector
---   match_threshold  : minimum cosine similarity (0.0–1.0), default 0.50
---   match_count      : max rows to return, default 5
---   filter_ministry  : exact ministry string filter, NULL = no filter
+-- Canonical version — matches exactly what retrieval_agent.py and route.ts send.
+-- Removed financial_year (column does not exist in documents table).
+-- Fixed SELECT column order to match RETURNS TABLE definition.
 CREATE OR REPLACE FUNCTION match_document_chunks (
   query_embedding  VECTOR(1536),
-  match_threshold  FLOAT   DEFAULT 0.50,
+  match_threshold  FLOAT   DEFAULT 0.30,
   match_count      INT     DEFAULT 5,
   filter_ministry  TEXT    DEFAULT NULL
 )
@@ -25,7 +31,6 @@ RETURNS TABLE (
   gazette_number   TEXT,
   doc_type         TEXT,
   publication_date DATE,
-  financial_year   TEXT,
   section          TEXT,
   clause           TEXT,
   page_number      INT,
@@ -38,13 +43,12 @@ BEGIN
   SELECT
     dc.id,
     dc.document_id,
-    d.title          AS doc_title,
-    d.ministry       AS ministry,
-    d.gazette_number AS gazette_number,
-    d.doc_type       AS doc_type,
-    d.publication_date,
-    d.financial_year,
     dc.content,
+    d.title            AS doc_title,
+    d.ministry         AS ministry,
+    d.gazette_number   AS gazette_number,
+    d.doc_type         AS doc_type,
+    d.publication_date AS publication_date,
     dc.section,
     dc.clause,
     dc.page_number,
