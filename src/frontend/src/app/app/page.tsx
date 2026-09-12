@@ -274,12 +274,12 @@ export default function AuthenticatedApp() {
           prev.map((doc) =>
             doc.id === tempId
               ? {
-                  ...doc,
-                  id: String(data.document_id || tempId),
-                  documentId: data.document_id,
-                  status: "ready",
-                  hash: data.sha256_hash,
-                }
+                ...doc,
+                id: String(data.document_id || tempId),
+                documentId: data.document_id,
+                status: "ready",
+                hash: data.sha256_hash,
+              }
               : doc
           )
         );
@@ -453,7 +453,7 @@ export default function AuthenticatedApp() {
               setClientSession(updatedSession);
             }
           })
-          .catch(() => {});
+          .catch(() => { });
       } else {
         // First time or unknown — check DB
         fetch(`/api/user/profile?email=${encodeURIComponent(session.email)}`)
@@ -1106,9 +1106,8 @@ export default function AuthenticatedApp() {
       {/* 1. COLLAPSIBLE LEFT SIDEBAR */}
       {/* ========================================================================= */}
       <aside
-        className={`h-full bg-[#F3ECE1] border-r border-[#DFD6C7] shadow-[3px_0_16px_rgba(0,0,0,0.05)] flex flex-col justify-between transition-all duration-200 ease-in-out z-30 flex-shrink-0 ${
-          sidebarOpen ? "w-[260px]" : "w-0 -translate-x-full md:translate-x-0 md:w-0 overflow-hidden"
-        }`}
+        className={`h-full bg-[#F3ECE1] border-r border-[#DFD6C7] shadow-[3px_0_16px_rgba(0,0,0,0.05)] flex flex-col justify-between transition-all duration-200 ease-in-out z-30 flex-shrink-0 ${sidebarOpen ? "w-[260px]" : "w-0 -translate-x-full md:translate-x-0 md:w-0 overflow-hidden"
+          }`}
       >
         {/* Top: Brand Header & New Analysis CTA */}
         <div className="px-3 pt-4 pb-0 space-y-1">
@@ -1150,25 +1149,25 @@ export default function AuthenticatedApp() {
 
           {/* Inline Search Input */}
           {showSidebarSearch && (
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={sidebarSearch}
-              onChange={(e) => setSidebarSearch(e.target.value)}
-              placeholder="Search conversations..."
-              autoFocus
-              className="w-full pl-8 pr-3 py-1.5 bg-[#EBE2D4] border border-[#DFD6C7] rounded-lg text-[11px] text-stone-800 placeholder-stone-500 focus:outline-none focus:border-[#5D2A18]"
-            />
-            {sidebarSearch && (
-              <button
-                onClick={() => setSidebarSearch("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            )}
-          </div>
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={sidebarSearch}
+                onChange={(e) => setSidebarSearch(e.target.value)}
+                placeholder="Search conversations..."
+                autoFocus
+                className="w-full pl-8 pr-3 py-1.5 bg-[#EBE2D4] border border-[#DFD6C7] rounded-lg text-[11px] text-stone-800 placeholder-stone-500 focus:outline-none focus:border-[#5D2A18]"
+              />
+              {sidebarSearch && (
+                <button
+                  onClick={() => setSidebarSearch("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           )}
 
           {/* + New Analysis Button */}
@@ -1196,9 +1195,9 @@ export default function AuthenticatedApp() {
               <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider text-stone-500 px-1">
                 <span>Session Files ({sessionDocs.length}/5)</span>
               </div>
-              {sessionDocs.map((doc) => (
+              {sessionDocs.map((doc, docIdx) => (
                 <div
-                  key={doc.id}
+                  key={`sidebar-doc-${doc.id || docIdx}-${docIdx}`}
                   className="flex items-center justify-between p-2 bg-white/90 border border-[#DFD6C7] rounded-xl text-xs shadow-2xs"
                 >
                   <div className="flex items-center gap-1.5 overflow-hidden">
@@ -1246,15 +1245,14 @@ export default function AuthenticatedApp() {
               );
             }
 
-            return displaySessions.map((s) => (
+            return displaySessions.map((s, sIdx) => (
               <div
-                key={s.id}
+                key={`sess-${s.id || sIdx}-${sIdx}`}
                 onClick={() => selectConversation(s.id)}
-                className={`group flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer ${
-                  currentSessionId === s.id && activeView === "chat"
+                className={`group flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer ${currentSessionId === s.id && activeView === "chat"
                     ? "bg-[#E3D8C8] text-[#1E1A17] font-semibold shadow-2xs"
                     : "text-stone-700 hover:bg-[#EAE0D2] hover:text-stone-900"
-                }`}
+                  }`}
               >
                 <span className="truncate flex-1 pr-1">{s.title}</span>
                 <button
@@ -1295,11 +1293,10 @@ export default function AuthenticatedApp() {
 
           <button
             onClick={() => setActiveView("settings")}
-            className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[13px] font-medium transition-colors cursor-pointer ${
-              activeView === "settings"
+            className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[13px] font-medium transition-colors cursor-pointer ${activeView === "settings"
                 ? "bg-[#E3D8C8] text-[#5D2A18] font-semibold"
                 : "text-stone-700 hover:bg-[#EAE0D2] hover:text-stone-900"
-            }`}
+              }`}
           >
             <SettingsIcon className="w-4 h-4" />
             <span>Settings</span>
@@ -1352,12 +1349,12 @@ export default function AuthenticatedApp() {
               {activeView === "chat"
                 ? currentSession?.title || "Government Document Assistant"
                 : activeView === "documents"
-                ? "Document Library"
-                : activeView === "compare"
-                ? "Document Comparison"
-                : activeView === "sources"
-                ? "Official Sources"
-                : "Workspace Settings"}
+                  ? "Document Library"
+                  : activeView === "compare"
+                    ? "Document Comparison"
+                    : activeView === "sources"
+                      ? "Official Sources"
+                      : "Workspace Settings"}
             </h1>
           </div>
 
@@ -1407,13 +1404,12 @@ export default function AuthenticatedApp() {
                               subscribed_authorities: user?.subscribedAuthorities,
                               onboarding_completed: true,
                             }),
-                          }).catch(() => {});
+                          }).catch(() => { });
                         }}
-                        className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between ${
-                          isCurrent
+                        className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between ${isCurrent
                             ? "bg-[#EAE3D9] text-[#5D2A18] font-semibold"
                             : "text-stone-700 hover:bg-[#F3EDE4]"
-                        }`}
+                          }`}
                       >
                         <span className="truncate">{domainName}</span>
                         {isCurrent && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
@@ -1471,8 +1467,8 @@ export default function AuthenticatedApp() {
                       </button>
                     </div>
                   )}
-                  {currentSession.messages.map((msg) => (
-                    <div key={msg.id} className="space-y-2">
+                  {currentSession.messages.map((msg, msgIdx) => (
+                    <div key={`msg-${msg.id || msgIdx}-${msgIdx}`} className="space-y-2">
                       {msg.role === "user" ? (
                         /* User Message */
                         <div className="flex justify-end">
@@ -1500,14 +1496,13 @@ export default function AuthenticatedApp() {
                                   <div className="flex flex-wrap gap-1.5">
                                     {msg.citations.map((cit, citIdx) => (
                                       <button
-                                        key={cit.id || citIdx}
+                                        key={`cit-${cit.id || citIdx}-${citIdx}`}
                                         type="button"
                                         onClick={() => setActiveCitation(cit)}
-                                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-left cursor-pointer transition-colors ${
-                                          activeCitation?.id === cit.id
+                                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-left cursor-pointer transition-colors ${activeCitation?.id === cit.id
                                             ? "bg-[#F5EDE3] border-[#D4A97A]"
                                             : "bg-[#FAF8F5] border-[#E8E2D8] hover:bg-[#F3EDE4] hover:border-[#C9956A]"
-                                        }`}
+                                          }`}
                                       >
                                         <span className="flex-shrink-0 w-3.5 h-3.5 rounded-full bg-[#5D2A18] text-white text-[8px] font-bold flex items-center justify-center">
                                           {citIdx + 1}
@@ -1597,14 +1592,13 @@ export default function AuthenticatedApp() {
                 {/* Attached Document Pill Bar (Clean File Names, No Technical Chunks Text) */}
                 {sessionDocs.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-[#FAF4EC]/90 border border-[#EADBCC] rounded-xl text-xs text-[#5D2A18] shadow-2xs animate-in fade-in duration-150">
-                    {sessionDocs.map((doc) => (
+                    {sessionDocs.map((doc, docIdx) => (
                       <div
-                        key={doc.id}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all ${
-                          doc.status === "uploading"
+                        key={`chat-pill-${doc.id || docIdx}-${docIdx}`}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all ${doc.status === "uploading"
                             ? "bg-amber-50 border-amber-300 text-amber-900"
                             : "bg-white border-[#E8E2D8] text-stone-800 shadow-2xs"
-                        }`}
+                          }`}
                       >
                         {doc.status === "uploading" ? (
                           <Loader2 className="w-3.5 h-3.5 text-amber-600 animate-spin flex-shrink-0" />
@@ -1777,8 +1771,8 @@ export default function AuthenticatedApp() {
                       (d) =>
                         (selectedDeptFilter === "All" || selectedDeptFilter === "All Ministries" || d.department.includes(selectedDeptFilter)) &&
                         (d.name.toLowerCase().includes(docSearch.toLowerCase()) || d.department.toLowerCase().includes(docSearch.toLowerCase()))
-                    ).map((doc) => (
-                      <tr key={doc.id} className="hover:bg-[#FAF8F5] transition-colors">
+                    ).map((doc, docIdx) => (
+                      <tr key={`table-doc-${doc.id || docIdx}-${docIdx}`} className="hover:bg-[#FAF8F5] transition-colors">
                         <td className="py-3 px-4 font-semibold text-stone-900 flex items-center gap-2">
                           <FileText className="w-3.5 h-3.5 text-[#5D2A18]" />
                           <span>{doc.name}</span>

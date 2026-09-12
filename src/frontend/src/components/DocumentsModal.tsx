@@ -182,9 +182,9 @@ export function DocumentsModal({ isOpen, onClose, onSelectDoc }: DocumentsModalP
               No government documents found matching your filter.
             </div>
           ) : (
-            filteredDocs.map((doc) => (
+            filteredDocs.map((doc, docIdx) => (
               <div
-                key={doc.id}
+                key={`modal-doc-${doc.id || docIdx}-${docIdx}`}
                 onClick={() => {
                   onSelectDoc(doc);
                   onClose();
