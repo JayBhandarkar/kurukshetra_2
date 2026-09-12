@@ -975,7 +975,7 @@ export default function AuthenticatedApp() {
     return <p className="leading-relaxed text-stone-800 my-1">{renderInlineContent(line, citations)}</p>;
   };
 
-  // Main Message Formatter
+  // Main Message Formatter with Rich Markdown Table Support
   const renderMessageContent = (content: string, citations?: Citation[]) => {
     if (!content) return null;
 
@@ -984,13 +984,106 @@ export default function AuthenticatedApp() {
       clean = clean.replace(/^```json\s*/, "").replace(/```$/, "").trim();
     }
 
-    const lines = clean.split("\n");
+    const rawLines = clean.split("\n");
+
+    // Group lines into table blocks vs regular line blocks
+    type ContentBlock =
+      | { type: "table"; headers: string[]; rows: string[][] }
+      | { type: "line"; text: string };
+
+    const blocks: ContentBlock[] = [];
+    let i = 0;
+
+    const parseTableRow = (r: string) =>
+      r
+        .trim()
+        .replace(/^\|/, "")
+        .replace(/\|$/, "")
+        .split("|")
+        .map((c) => c.trim());
+
+    const isTableSeparator = (r: string) => /^\|?[\s\-:|]+\|?$/.test(r.trim());
+
+    while (i < rawLines.length) {
+      const line = rawLines[i];
+      const trimmed = line.trim();
+
+      if (trimmed.startsWith("|") && trimmed.includes("|", 1)) {
+        // Collect consecutive table lines
+        const tableLines: string[] = [];
+        while (i < rawLines.length && rawLines[i].trim().startsWith("|") && rawLines[i].trim().includes("|", 1)) {
+          tableLines.push(rawLines[i].trim());
+          i++;
+        }
+
+        if (tableLines.length >= 2) {
+          const headerRow = parseTableRow(tableLines[0]);
+          const dataRows: string[][] = [];
+
+          for (let j = 1; j < tableLines.length; j++) {
+            if (isTableSeparator(tableLines[j])) continue;
+            const parsed = parseTableRow(tableLines[j]);
+            if (parsed.length > 0 && parsed.some((cell) => cell.length > 0)) {
+              dataRows.push(parsed);
+            }
+          }
+
+          blocks.push({ type: "table", headers: headerRow, rows: dataRows });
+          continue;
+        } else {
+          // Lone pipe line, render as normal line
+          blocks.push({ type: "line", text: tableLines[0] });
+          continue;
+        }
+      }
+
+      blocks.push({ type: "line", text: line });
+      i++;
+    }
 
     return (
       <div className="space-y-1 text-[14.5px] leading-relaxed text-[#1E1A17]">
-        {lines.map((line, idx) => {
-          if (!line.trim()) return <div key={idx} className="h-1" />;
-          return <React.Fragment key={idx}>{renderFormattedLine(line, citations)}</React.Fragment>;
+        {blocks.map((block, bIdx) => {
+          if (block.type === "table") {
+            return (
+              <div key={bIdx} className="overflow-x-auto my-3.5 rounded-xl border border-[#DFD6C7] bg-[#FCFAF7] shadow-xs">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-[#F3ECE1] border-b border-[#DFD6C7]">
+                      {block.headers.map((h, hIdx) => (
+                        <th
+                          key={hIdx}
+                          className="py-2.5 px-3.5 font-bold text-[#4A2012] text-[13px] tracking-tight whitespace-nowrap first:rounded-tl-xl last:rounded-tr-xl"
+                        >
+                          {renderInlineContent(h, citations)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#EFE7DC]">
+                    {block.rows.map((row, rIdx) => (
+                      <tr
+                        key={rIdx}
+                        className="hover:bg-[#F8F2E8] transition-colors odd:bg-white/70 even:bg-[#FAF6F0]/50"
+                      >
+                        {row.map((cell, cIdx) => (
+                          <td
+                            key={cIdx}
+                            className="py-2.5 px-3.5 text-[13px] text-[#2C241E] leading-relaxed align-top"
+                          >
+                            {renderInlineContent(cell, citations)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          }
+
+          if (!block.text.trim()) return <div key={bIdx} className="h-1" />;
+          return <React.Fragment key={bIdx}>{renderFormattedLine(block.text, citations)}</React.Fragment>;
         })}
       </div>
     );
@@ -1013,7 +1106,7 @@ export default function AuthenticatedApp() {
       {/* 1. COLLAPSIBLE LEFT SIDEBAR */}
       {/* ========================================================================= */}
       <aside
-        className={`h-full bg-[#FAF8F5] border-r border-[#E8E2D8] flex flex-col justify-between transition-all duration-200 ease-in-out z-30 flex-shrink-0 ${
+        className={`h-full bg-[#F3ECE1] border-r border-[#DFD6C7] shadow-[3px_0_16px_rgba(0,0,0,0.05)] flex flex-col justify-between transition-all duration-200 ease-in-out z-30 flex-shrink-0 ${
           sidebarOpen ? "w-[260px]" : "w-0 -translate-x-full md:translate-x-0 md:w-0 overflow-hidden"
         }`}
       >
@@ -1022,7 +1115,7 @@ export default function AuthenticatedApp() {
           {/* Brand Row */}
           <div className="flex items-center justify-between">
             <Link href="/app" className="flex items-center gap-2.5 group">
-              <div className="w-8 h-8 rounded-xl bg-[#5D2A18] flex items-center justify-center flex-shrink-0 shadow-sm">
+              <div className="w-8 h-8 rounded-xl bg-[#5D2A18] flex items-center justify-center flex-shrink-0 shadow-xs">
                 <PillarLogoIcon className="w-4 h-4 text-white" />
               </div>
               <div className="flex flex-col">
@@ -1039,7 +1132,7 @@ export default function AuthenticatedApp() {
               {/* Search Toggle */}
               <button
                 onClick={() => { setShowSidebarSearch(v => !v); setSidebarSearch(""); }}
-                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showSidebarSearch ? "bg-[#EFE9E0] text-[#5D2A18]" : "text-stone-400 hover:text-stone-700 hover:bg-[#EFE9E0]"}`}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showSidebarSearch ? "bg-[#E6DDCF] text-[#5D2A18]" : "text-stone-500 hover:text-stone-800 hover:bg-[#E6DDCF]"}`}
                 title="Search conversations"
               >
                 <Search className="w-4 h-4" />
@@ -1047,7 +1140,7 @@ export default function AuthenticatedApp() {
               {/* Close Sidebar */}
               <button
                 onClick={() => setSidebarOpen(false)}
-                className="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-[#EFE9E0] rounded-lg transition-colors cursor-pointer"
+                className="p-1.5 text-stone-500 hover:text-stone-800 hover:bg-[#E6DDCF] rounded-lg transition-colors cursor-pointer"
                 title="Close sidebar"
               >
                 <PanelLeft className="w-4 h-4" />
@@ -1065,7 +1158,7 @@ export default function AuthenticatedApp() {
               onChange={(e) => setSidebarSearch(e.target.value)}
               placeholder="Search conversations..."
               autoFocus
-              className="w-full pl-8 pr-3 py-1.5 bg-[#F3EDE4] border border-[#E8E2D8] rounded-lg text-[11px] text-stone-700 placeholder-stone-400 focus:outline-none focus:border-[#5D2A18]"
+              className="w-full pl-8 pr-3 py-1.5 bg-[#EBE2D4] border border-[#DFD6C7] rounded-lg text-[11px] text-stone-800 placeholder-stone-500 focus:outline-none focus:border-[#5D2A18]"
             />
             {sidebarSearch && (
               <button
@@ -1081,9 +1174,9 @@ export default function AuthenticatedApp() {
           {/* + New Analysis Button */}
           <button
             onClick={startNewChat}
-            className="w-full flex items-center gap-2.5 px-2 py-2 mt-1 text-[13px] font-medium text-stone-700 hover:bg-[#F3EDE4] hover:text-stone-900 rounded-lg transition-colors cursor-pointer"
+            className="w-full flex items-center gap-2.5 px-2.5 py-2 mt-1 text-[13px] font-medium text-stone-700 hover:bg-[#E6DDCF] hover:text-stone-900 rounded-lg transition-colors cursor-pointer"
           >
-            <Plus className="w-4 h-4 text-stone-500" />
+            <Plus className="w-4 h-4 text-stone-600" />
             <span>New Analysis</span>
           </button>
 
@@ -1099,14 +1192,14 @@ export default function AuthenticatedApp() {
 
           {/* Attached Document Indicators in Sidebar (if active) */}
           {sessionDocs.length > 0 && (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider text-stone-400 px-1">
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider text-stone-500 px-1">
                 <span>Session Files ({sessionDocs.length}/5)</span>
               </div>
               {sessionDocs.map((doc) => (
                 <div
                   key={doc.id}
-                  className="flex items-center justify-between p-2 bg-white border border-[#E8E2D8] rounded-xl text-xs shadow-2xs"
+                  className="flex items-center justify-between p-2 bg-white/90 border border-[#DFD6C7] rounded-xl text-xs shadow-2xs"
                 >
                   <div className="flex items-center gap-1.5 overflow-hidden">
                     {doc.status === "uploading" ? (
@@ -1137,8 +1230,8 @@ export default function AuthenticatedApp() {
         </div>
 
         {/* Middle: Recent Chats List */}
-        <div className="flex-1 px-3 pt-0 pb-2 overflow-y-auto space-y-0.5 scrollbar-thin">
-          <div className="px-2 pt-0 pb-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+        <div className="flex-1 px-3 pt-1 pb-2 overflow-y-auto space-y-0.5 scrollbar-thin">
+          <div className="px-2 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-stone-500">
             Recent Analysis
           </div>
           {(() => {
@@ -1157,10 +1250,10 @@ export default function AuthenticatedApp() {
               <div
                 key={s.id}
                 onClick={() => selectConversation(s.id)}
-                className={`group flex items-center justify-between px-2 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer ${
+                className={`group flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[13px] transition-colors cursor-pointer ${
                   currentSessionId === s.id && activeView === "chat"
-                    ? "bg-[#EAE3D9] text-[#1E1A17] font-medium"
-                    : "text-stone-600 hover:bg-[#F3EDE4] hover:text-stone-900"
+                    ? "bg-[#E3D8C8] text-[#1E1A17] font-semibold shadow-2xs"
+                    : "text-stone-700 hover:bg-[#EAE0D2] hover:text-stone-900"
                 }`}
               >
                 <span className="truncate flex-1 pr-1">{s.title}</span>
@@ -1180,7 +1273,7 @@ export default function AuthenticatedApp() {
               type="button"
               onClick={loadMoreConversations}
               disabled={loadingMoreConversations}
-              className="w-full py-1.5 px-2 mt-2 text-[11px] font-medium text-stone-500 hover:text-[#5D2A18] hover:bg-[#F3EDE4] rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              className="w-full py-1.5 px-2 mt-2 text-[11px] font-medium text-stone-600 hover:text-[#5D2A18] hover:bg-[#EAE0D2] rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
               {loadingMoreConversations ? (
                 <>
@@ -1198,14 +1291,14 @@ export default function AuthenticatedApp() {
         </div>
 
         {/* Bottom: Settings & User Profile */}
-        <div className="px-3 py-3 border-t border-[#EAE3D9] space-y-1">
+        <div className="px-3 py-3 border-t border-[#DFD6C7] space-y-1">
 
           <button
             onClick={() => setActiveView("settings")}
-            className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-[13px] font-medium transition-colors cursor-pointer ${
+            className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[13px] font-medium transition-colors cursor-pointer ${
               activeView === "settings"
-                ? "bg-[#EFE9E0] text-[#5D2A18]"
-                : "text-stone-600 hover:bg-[#F3EDE4] hover:text-stone-900"
+                ? "bg-[#E3D8C8] text-[#5D2A18] font-semibold"
+                : "text-stone-700 hover:bg-[#EAE0D2] hover:text-stone-900"
             }`}
           >
             <SettingsIcon className="w-4 h-4" />
@@ -1213,16 +1306,16 @@ export default function AuthenticatedApp() {
           </button>
 
           {/* User Row */}
-          <div className="pt-2 border-t border-[#EAE3D9] flex items-center justify-between">
+          <div className="pt-2 border-t border-[#DFD6C7] flex items-center justify-between">
             <div className="flex items-center gap-2 overflow-hidden">
-              <div className="w-7 h-7 rounded-full bg-[#5D2A18] text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
+              <div className="w-7 h-7 rounded-full bg-[#5D2A18] text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-2xs">
                 {user?.fullName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || "P"}
               </div>
               <div className="overflow-hidden">
                 <span className="text-xs font-bold text-stone-900 block truncate">
                   {user?.fullName || user?.email?.split("@")[0]}
                 </span>
-                <span className="text-[10px] text-stone-400 block truncate max-w-[120px]">
+                <span className="text-[10px] text-stone-500 block truncate max-w-[120px]">
                   {user?.email}
                 </span>
               </div>
