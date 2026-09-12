@@ -39,11 +39,26 @@ export async function POST(request: Request) {
     let conversationId = reqConvId;
 
     // Ensure active conversation exists in DB.
-    // Local draft sessions have ids like "session-<timestamp>" — not valid UUIDs.
-    // Create a real DB record for them so messages are persisted and appear in history.
+    //
+    // Cases:
+    //  A. conversationId is missing or a local "session-" draft → create new DB record.
+    //  B. conversationId is a real UUID but was pre-generated on the client before the
+    //     DB fetch completed (new page.tsx behaviour) → upsert ensures idempotency.
+    //  C. conversationId is a real UUID that already exists in DB → skip creation entirely.
+    //
+    // The upsert in createConversation handles cases B & C safely (ignoreDuplicates).
     if (!conversationId || conversationId.startsWith("session-")) {
-      const newConv = await createConversation(userId, cleanQuery.slice(0, 48), conversationId?.startsWith("session-") ? undefined : conversationId);
+      // Local draft or empty — always create/ensure a DB record
+      const newConv = await createConversation(
+        userId,
+        cleanQuery.slice(0, 48),
+        undefined  // let DB assign a fresh UUID
+      );
       conversationId = newConv.id;
+    } else {
+      // Real UUID supplied by client — ensure the row exists without overwriting it
+      // (handles the pre-generated UUID case and is a no-op if already in DB)
+      await createConversation(userId, cleanQuery.slice(0, 48), conversationId);
     }
 
     // 1. Save User Question to normalized Messages table

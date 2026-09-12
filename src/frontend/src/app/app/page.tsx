@@ -524,8 +524,10 @@ export default function AuthenticatedApp() {
             }
           }
 
-          // Start clean initial conversation
-          const freshId = `session-${Date.now()}`;
+          // Start clean initial conversation — use a real UUID so if the user
+          // sends a message before DB load completes, the same ID is reused on
+          // the next refresh instead of creating a duplicate session.
+          const freshId = crypto.randomUUID();
           const freshSession: ChatSession = {
             id: freshId,
             title: "New Conversation",
@@ -538,7 +540,7 @@ export default function AuthenticatedApp() {
         })
         .catch((err) => {
           console.warn("Conversations API fallback:", err);
-          const freshId = `session-${Date.now()}`;
+          const freshId = crypto.randomUUID();
           const freshSession: ChatSession = {
             id: freshId,
             title: "New Conversation",
@@ -586,7 +588,9 @@ export default function AuthenticatedApp() {
   };
 
   const startNewChat = async () => {
-    const newId = `session-${Date.now()}`;
+    // Use a real UUID so that if the user sends a message immediately (before any
+    // DB write), the same ID is stable on the next refresh — no duplicate sessions.
+    const newId = crypto.randomUUID();
     const newSession: ChatSession = {
       id: newId,
       title: "New Conversation",
@@ -594,10 +598,10 @@ export default function AuthenticatedApp() {
       docCount: 0,
       messages: [],
     };
-    // Keep all DB-persisted sessions (non "session-" id) + local sessions that have messages
-    // Drop any existing unsaved empty drafts to avoid accumulation
+    // Keep all sessions that have messages. Drop empty unsaved drafts to avoid
+    // accumulating blank entries in the sidebar on repeated "New Analysis" clicks.
     const existingActive = sessions.filter(
-      (s) => !s.id.startsWith("session-") || (s.messages && s.messages.length > 0)
+      (s) => s.messages && s.messages.length > 0
     );
     setSessions([newSession, ...existingActive]);
     setCurrentSessionId(newId);
@@ -613,7 +617,7 @@ export default function AuthenticatedApp() {
     e.stopPropagation();
     const filtered = sessions.filter((s) => s.id !== sessionId);
     if (filtered.length === 0) {
-      const freshId = `session-${Date.now()}`;
+      const freshId = crypto.randomUUID();
       const freshSession: ChatSession = {
         id: freshId,
         title: "New Conversation",

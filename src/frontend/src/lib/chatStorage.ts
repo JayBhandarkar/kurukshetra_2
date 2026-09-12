@@ -203,6 +203,8 @@ export async function getMessagesKeyset(
 
 /**
  * 3. Create or Ensure Conversation
+ * Uses upsert with ignoreDuplicates so calling this twice with the same id
+ * (race condition on refresh) never creates a second DB row.
  */
 export async function createConversation(
   userId: string,
@@ -221,13 +223,24 @@ export async function createConversation(
   };
 
   try {
-    const { data, error } = await supabase
+    // onConflict: if a row with this id already exists, do nothing (no duplicate).
+    // Return the existing row by fetching it when upsert returns nothing.
+    const { data } = await supabase
       .from("conversations")
-      .insert([record])
+      .upsert([record], { onConflict: "id", ignoreDuplicates: true })
       .select()
       .single();
 
     if (data) return data as ConversationRecord;
+
+    // ignoreDuplicates suppressed the return — fetch the existing row instead
+    const { data: existing } = await supabase
+      .from("conversations")
+      .select("id, user_id, title, created_at, updated_at")
+      .eq("id", newId)
+      .single();
+
+    if (existing) return existing as ConversationRecord;
   } catch (e) {
     console.warn("createConversation DB fallback:", e);
   }
